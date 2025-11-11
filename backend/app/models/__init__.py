@@ -1,9 +1,9 @@
 """Database models for Hermes system."""
-from backend.app.models.user import User
-from backend.app.models.task import Task
-from backend.app.models.file import File
-from backend.app.models.task_result import TaskResult
-from backend.app.models.message import Message
+from app.models.user import User
+from app.models.task import Task
+from app.models.file import File
+from app.models.task_result import TaskResult
+from app.models.message import Message
 
 __all__ = [
     "User",

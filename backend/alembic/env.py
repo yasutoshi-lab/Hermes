@@ -18,7 +18,16 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-target_metadata = None
+import sys
+from pathlib import Path
+
+# Add backend directory to sys.path for imports
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app.db.base import Base
+from app.models import User, Task, File, TaskResult, Message
+
+target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
