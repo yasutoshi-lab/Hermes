@@ -1,106 +1,278 @@
-# Hermes - Literature Summarization & Analysis Agent
+# Hermes - Local Research Analyst Agent
 
-Hermesは、開発者や研究者が論文や技術文書を手元の環境で要約・分析するための研究支援エージェントです。
+Hermes is a local research analyst agent system that helps developers and researchers efficiently collect, analyze, and summarize academic papers and technical documentation. Built with LangGraph and Ollama, all processing runs locally to protect your privacy.
 
-## 特徴
+## Features
 
-- **ローカル処理**: すべての処理をローカル環境で実行し、プライバシーを保護
-- **高度な要約**: Ollama + gpt-oss:20bによる文献の要約と分析
-- **Web検索統合**: Web-Search-MCPによる関連情報の自動収集
-- **安全な環境**: Container Useによる隔離された実行環境
-- **タスクスケジューリング**: 指定時刻での自動処理
-- **多言語対応**: 日本語・英語のサポート
+- **Fully Local Processing**: All LLM operations run locally via Ollama (except web search)
+- **Intelligent Workflow**: LangGraph-based stateful workflow orchestration
+- **Web Search Integration**: Automated information gathering via web-search-mcp
+- **Isolated Execution**: Safe processing environment using container-use
+- **Verification Loop**: Automated fact-checking and validation of results
+- **Multi-language Support**: Japanese and English interface
+- **Session History**: All searches and reports saved locally in Markdown/PDF format
 
-## アーキテクチャ
+## Architecture
+
+Hermes uses a node-based workflow architecture powered by LangGraph:
 
 ```
-Frontend (React + TypeScript)
+User Input
     ↓
-Backend API (FastAPI)
-    ↓
-PostgreSQL + Ollama + Web-Search-MCP + Container Use
+InputNode → SearchNode → ProcessingNode → LLMNode
+                ↓            ↓             ↓
+           VerificationNode (loop back if needed)
+                ↓
+           ReportNode → Final Output
 ```
 
-## 技術スタック
+Each node is a specialized component:
+- **InputNode**: Accepts user queries and configuration
+- **SearchNode**: Retrieves information via web-search-mcp
+- **ProcessingNode**: Processes and cleans data in isolated containers
+- **LLMNode**: Analyzes content using Ollama (gpt-oss:20b)
+- **VerificationNode**: Validates results and triggers re-search if needed
+- **ReportNode**: Generates final Markdown/PDF reports
 
-### バックエンド
-- FastAPI 0.115.0
-- SQLAlchemy 2.0 + PostgreSQL
-- APScheduler (タスクスケジューリング)
-- Ollama (LLM)
+## Technology Stack
 
-### フロントエンド
-- React + TypeScript
-- Tailwind CSS
-- React Router
-- i18next (多言語対応)
+### Core Components
+- **LangGraph**: Stateful workflow orchestration with durable execution
+- **Ollama**: Local LLM inference (gpt-oss:20b default)
+- **web-search-mcp**: Web search and content extraction
+- **container-use**: Isolated execution environments
 
-### インフラ
-- Docker + Docker Compose
-- PostgreSQL 16
+### Python Dependencies
+- `langgraph` - Workflow orchestration
+- `langchain` + `langchain-community` - LLM framework
+- `ollama` - Ollama Python client
+- `mcp` - Model Context Protocol client
+- `pydantic` - Data validation
+- `markdown` + `reportlab` - Report generation
 
-## セットアップ
+## Prerequisites
 
-### 前提条件
-- Docker & Docker Compose
-- Ollama (ローカルインストール)
-- Python 3.11+
-- Node.js 18+
+Before installing Hermes, ensure you have:
 
-### インストール
+- **Python 3.11+**
+- **Ollama** (installed locally)
+- **Docker** (for container-use)
+- **Git**
 
-1. リポジトリのクローン
+## Installation
+
+### 1. Clone the Repository
+
 ```bash
 git clone <repository-url>
 cd Hermes
 ```
 
-2. Ollamaモデルのダウンロード
+### 2. Install Ollama and Download Model
+
 ```bash
+# Install Ollama (if not already installed)
+# Visit: https://ollama.ai/
+
+# Download the default model
 ollama pull gpt-oss:20b
 ```
 
-3. Dockerサービスの起動
-```bash
-cd docker
-docker-compose up -d
-```
+### 3. Install Python Dependencies
 
-4. バックエンドの起動
 ```bash
-cd backend
+# Create virtual environment
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install the package
+pip install -e .
+
+# Or install dependencies directly
 pip install -r requirements.txt
-uvicorn app.main:app --reload
 ```
 
-5. フロントエンドの起動
+### 4. Configure MCP Servers
+
+Set up the required MCP servers:
+
 ```bash
-cd frontend
-npm install
-npm run dev
+# web-search-mcp
+npx -y web-search-mcp
+
+# container-use (follow setup instructions)
+# Visit: https://github.com/anthropics/anthropic-tools
 ```
 
-## 開発状況
+### 5. Configure Environment (Optional)
 
-現在、以下の機能を開発中です：
+Create a `.env` file in the project root:
 
-- [x] プロジェクト構造の初期化
-- [ ] データベーススキーマの設計
-- [ ] バックエンドAPI基盤
-- [ ] フロントエンド基盤
-- [ ] ユーザー認証
-- [ ] ファイルアップロード
-- [ ] タスクスケジューラー
-- [ ] Ollama統合
-- [ ] Web-Search-MCP統合
-- [ ] Container Use統合
+```bash
+HERMES_DEFAULT_MODEL=gpt-oss:20b
+HERMES_DEFAULT_LANGUAGE=ja
+HERMES_OLLAMA_API_ENDPOINT=http://localhost:11434
+HERMES_WEB_SEARCH_MCP_ENDPOINT=http://localhost:3000
+HERMES_CONTAINER_USE_MCP_ENDPOINT=http://localhost:3001
+```
 
-## ライセンス
+## Quick Start
+
+### Basic Usage
+
+```bash
+# Start Hermes CLI
+hermes
+
+# Or run directly
+python -m cli.main
+```
+
+### Example Queries
+
+```python
+from src.orchestrator.workflow import create_workflow
+from src.state.agent_state import AgentState
+
+# Initialize workflow
+workflow = create_workflow()
+
+# Run a research query
+initial_state = {
+    "query": "Summarize recent advances in LangGraph",
+    "language": "en",
+    "model_name": "gpt-oss:20b"
+}
+
+result = workflow.invoke(initial_state)
+print(result["final_report"])
+```
+
+## Project Structure
+
+```
+Hermes/
+├── src/
+│   ├── nodes/              # LangGraph workflow nodes
+│   │   ├── input_node.py
+│   │   ├── search_node.py
+│   │   ├── processing_node.py
+│   │   ├── llm_node.py
+│   │   ├── verification_node.py
+│   │   └── report_node.py
+│   ├── state/              # State definitions
+│   │   └── agent_state.py
+│   ├── orchestrator/       # Workflow orchestration
+│   │   └── workflow.py
+│   ├── modules/            # Utility modules
+│   │   ├── history_manager.py
+│   │   ├── model_manager.py
+│   │   └── language_detector.py
+│   ├── cli/                # Command-line interface
+│   │   └── main.py
+│   └── config/             # Configuration
+│       └── settings.py
+├── tests/                  # Test suite
+├── sessions/               # Session history storage
+├── requirements.txt
+├── setup.py
+└── README.md
+```
+
+## Configuration
+
+All configuration is managed through `src/config/settings.py`. Key settings include:
+
+- `default_model`: Ollama model to use (default: `gpt-oss:20b`)
+- `default_language`: UI language (`ja` or `en`)
+- `session_storage_path`: Where to save session history
+- `ollama_api_endpoint`: Ollama server URL
+- `web_search_mcp_endpoint`: Web search MCP server URL
+- `container_use_mcp_endpoint`: Container use MCP server URL
+
+Settings can be overridden via environment variables with the `HERMES_` prefix.
+
+## Development
+
+### Running Tests
+
+```bash
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=src tests/
+
+# Run specific test file
+pytest tests/test_nodes/test_search_node.py
+```
+
+### Project Development Status
+
+- [x] Project structure and dependencies setup
+- [ ] State management implementation
+- [ ] Node implementations
+- [ ] LangGraph workflow orchestration
+- [ ] MCP server integrations
+- [ ] CLI interface
+- [ ] Session history management
+- [ ] Report generation
+- [ ] Comprehensive testing
+
+## Privacy & Security
+
+Hermes is designed with privacy in mind:
+
+- **No Cloud Dependencies**: All LLM processing runs locally via Ollama
+- **Isolated Execution**: Code runs in containers for security
+- **Local Storage**: All data stays on your machine
+- **No Telemetry**: No usage data sent to external services
+
+Note: Web search functionality does make external requests to search engines.
+
+## Troubleshooting
+
+### Ollama Connection Issues
+
+```bash
+# Check if Ollama is running
+ollama list
+
+# Restart Ollama service
+# On macOS/Linux: restart via system services
+# On Windows: restart via Task Manager
+```
+
+### MCP Server Issues
+
+Ensure MCP servers are running:
+```bash
+# Check web-search-mcp
+curl http://localhost:3000/health
+
+# Check container-use
+docker ps
+```
+
+## Contributing
+
+Contributions are welcome! Please see `CONTRIBUTING.md` for guidelines.
+
+## License
 
 TBD
 
-## 貢献
+## Acknowledgments
 
-貢献を歓迎します！詳細はCONTRIBUTING.mdを参照してください。
+Built with:
+- [LangGraph](https://langchain-ai.github.io/langgraph/) by LangChain
+- [Ollama](https://ollama.ai/) for local LLM inference
+- [web-search-mcp](https://github.com/modelcontextprotocol/servers) for web search
+- [container-use](https://github.com/anthropics/anthropic-tools) for isolated execution
+
+## References
+
+- Design Document: `基本設計書.md`
+- LangGraph Documentation: https://langchain-ai.github.io/langgraph/
+- Ollama Documentation: https://ollama.ai/
+- Model Context Protocol: https://modelcontextprotocol.io/

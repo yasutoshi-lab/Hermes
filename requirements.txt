@@ -1,0 +1,17 @@
+# Research Analyst Agent - Dependencies
+
+# LangGraph for workflow orchestration
+langgraph>=0.2.0
+
+# LangChain core for message handling and utilities
+langchain-core>=0.3.0
+
+# Type checking and validation
+typing-extensions>=4.12.0
+
+# For future integration (commented out until implemented)
+# ollama>=0.1.0                    # Local LLM integration
+# requests>=2.32.0                 # HTTP requests for MCP
+# docker>=7.0.0                    # Container management
+# markdown>=3.5.0                  # Markdown processing
+# reportlab>=4.0.0                 # PDF generation
