@@ -10,7 +10,7 @@ Design Reference:
     基本設計書.md Section 4.2 - State Design
 """
 
-from typing import TypedDict, Annotated, Callable
+from typing import Any, Dict, TypedDict, Annotated, Callable
 from langgraph.graph import add_messages
 
 
@@ -84,6 +84,9 @@ class AgentState(TypedDict):
     errors: list[str]
     """Error messages if any"""
 
+    verification_summary: Dict[str, Any]
+    """Metadata describing the latest verification outcome"""
+
 
 def create_initial_state(
     query: str = "",
@@ -125,6 +128,7 @@ def create_initial_state(
         model_name=model_name,
         history_path=history_path,
         verification_count=0,
+        verification_summary={},
         errors=[]
     )
 

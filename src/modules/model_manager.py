@@ -10,7 +10,7 @@ try:
 except ImportError:
     ollama = None
 
-from ..config import settings
+from config import settings
 
 # Configure logging
 logger = logging.getLogger(__name__)

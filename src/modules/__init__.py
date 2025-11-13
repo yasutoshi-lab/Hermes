@@ -7,6 +7,13 @@ from .model_manager import (
     OllamaConnectionError
 )
 from .language_detector import LanguageDetector
+from .mcp_client import (
+    WebSearchClient,
+    MCPClientError,
+    RateLimitError,
+    TransportNotAvailableError,
+    SearchResult,
+)
 
 __all__ = [
     "HistoryManager",
@@ -14,4 +21,9 @@ __all__ = [
     "ModelNotFoundError",
     "OllamaConnectionError",
     "LanguageDetector",
+    "WebSearchClient",
+    "MCPClientError",
+    "RateLimitError",
+    "TransportNotAvailableError",
+    "SearchResult",
 ]

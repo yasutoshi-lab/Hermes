@@ -8,7 +8,11 @@ All settings can be overridden via environment variables or CLI arguments.
 import os
 from pathlib import Path
 from typing import Literal
-from pydantic import BaseSettings, Field
+try:
+    from pydantic import BaseSettings, Field
+except Exception:  # pragma: no cover - fallback for pydantic>=2
+    from pydantic import Field
+    from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -63,6 +67,42 @@ class Settings(BaseSettings):
     timeout_seconds: int = Field(
         default=300,
         description="Default timeout for long-running operations (in seconds)"
+    )
+
+    # Verification Configuration
+    verification_max_loops: int = Field(
+        default=2,
+        description="Maximum number of verification iterations before forcing report"
+    )
+
+    verification_pass_ratio: float = Field(
+        default=0.8,
+        description="Minimum ratio of passing claims required to skip re-search"
+    )
+
+    verification_min_confidence: float = Field(
+        default=0.5,
+        description="Minimum average confidence required to skip re-search"
+    )
+
+    verification_claim_pass_threshold: float = Field(
+        default=0.65,
+        description="Per-claim support score threshold to mark as PASS"
+    )
+
+    verification_claim_review_threshold: float = Field(
+        default=0.4,
+        description="Per-claim support score threshold to request review instead of fail"
+    )
+
+    verification_search_limit: int = Field(
+        default=3,
+        description="Number of snippets fetched per claim during verification search"
+    )
+
+    verification_max_claims: int = Field(
+        default=5,
+        description="Maximum number of claims to evaluate per verification loop"
     )
 
     # Report Generation

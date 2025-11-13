@@ -34,6 +34,8 @@ Each node is a specialized component:
 - **VerificationNode**: Validates results and triggers re-search if needed
 - **ReportNode**: Generates final Markdown/PDF reports
 
+For node-specific behavior, refer to [docs/input_node.md](docs/input_node.md) (entry + detection stage) and [docs/verification_flow.md](docs/verification_flow.md) (verification loop and routing thresholds).
+
 ## Technology Stack
 
 ### Core Components
@@ -121,12 +123,14 @@ HERMES_CONTAINER_USE_MCP_ENDPOINT=http://localhost:3001
 ### Basic Usage
 
 ```bash
-# Start Hermes CLI
-hermes
+# One-off query
+hermes query "Summarize recent LangGraph progress" --language en
 
-# Or run directly
-python -m cli.main
+# Interactive loop
+hermes interactive
 ```
+
+See [CLI Usage](docs/cli_usage.md) for the full command reference (history management, model commands, streaming mode, etc.).
 
 ### Example Queries
 
@@ -178,6 +182,11 @@ Hermes/
 ├── setup.py
 └── README.md
 ```
+
+## Documentation
+
+- `docs/LANGGRAPH_IMPLEMENTATION.md` explains each LangGraph node, shared state, and helper modules.
+- `docs/verification_flow.md` shows how provisional answers, verification loops, and report artifacts interact so you can trace outputs end-to-end.
 
 ## Configuration
 

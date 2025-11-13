@@ -1,29 +1,23 @@
-"""Workflow orchestration module for research analyst agent."""
+"""Workflow orchestration module for Hermes."""
 
 from .workflow import (
-    create_workflow,
+    WorkflowDependencies,
+    WorkflowEvent,
+    WorkflowRunResult,
     compile_workflow,
-    visualize_workflow,
+    create_workflow,
     run_workflow,
-    input_node,
-    search_node,
-    processing_node,
-    llm_node,
-    verification_node,
-    report_node,
-    should_continue_verification
+    should_continue_verification,
+    visualize_workflow,
 )
 
 __all__ = [
+    "WorkflowDependencies",
+    "WorkflowEvent",
+    "WorkflowRunResult",
     "create_workflow",
     "compile_workflow",
-    "visualize_workflow",
     "run_workflow",
-    "input_node",
-    "search_node",
-    "processing_node",
-    "llm_node",
-    "verification_node",
-    "report_node",
-    "should_continue_verification"
+    "visualize_workflow",
+    "should_continue_verification",
 ]

@@ -39,6 +39,7 @@ class AgentState(TypedDict):
 | `model_name` | `str` | LLM model identifier | Default: 'gpt-oss:20b', configurable |
 | `history_path` | `str` | Session history save path | Format: 'session_<timestamp>' |
 | `verification_count` | `int` | Verification loops executed | Prevents infinite loops, tracks depth |
+| `verification_summary` | `dict` | Latest verification aggregate metrics | Stores pass counts, confidence, and routing flag |
 | `errors` | `list[str]` | Error messages | Debugging and user feedback |
 
 ## Workflow Architecture
@@ -66,59 +67,73 @@ class AgentState(TypedDict):
 3. Verify model availability
 4. Set up session history path
 
+See [docs/input_node.md](input_node.md) for heuristics, error handling, and the reusable `prepare_initial_context` helper that powers the CLI/REPL flows.
+
 #### 2. SearchNode
-**Purpose**: Gather information using web-search-mcp
+**Purpose**: Gather information using web-search-mcp with resilient multi-strategy queries.
 
 **Inputs**:
-- query (string to search for)
+- `query` (string to search for)
+- `language` (ja/en)
+- `history_path` (for audit trail persistence)
 
 **Outputs**:
-- search_results (list of search hits with full content)
+- `search_results` (list of dicts containing `title`, `url`, `summary`, `content`, `language`, `retrieved_at`)
+- `errors` (appended only when we encounter partial failures)
 
 **Processing**:
-1. Call web-search-mcp `full-web-search` tool
-2. Parse results (title, URL, description, content)
-3. Handle search failures with retry/fallback
-4. Store results in state
+1. Instantiate `WebSearchClient` (`src/modules/mcp_client.py`) which wraps `full-web-search`, `get-web-search-summaries`, and `get-single-web-page-content` with retry/backoff.
+2. Execute `full-web-search` using language-aware query shaping (adds `最新情報` for Japanese queries, `latest insights` for English) and normalize the payload.
+3. If the number of enriched results is < `settings.default_search_limit` (default 5), fall back to `get-web-search-summaries`.
+4. Generate heuristic follow-up queries (根拠/事例/最新ニュース for Japanese, supporting data/case study/regulatory context for English) and run `multi_search` to broaden coverage.
+5. Fetch full page bodies for up to three high-priority URLs that returned only snippets so downstream nodes always receive `content`.
+6. Deduplicate by URL, attach ISO timestamps, and persist the raw payload to `HistoryManager.save_search_results`.
 
-**Design Reference**: Uses web-search-mcp's multi-engine search (Google → DuckDuckGo fallback)
+**Design Reference**: 基本設計書 Section 2.2/5 (search flow); web-search-mcp multi-engine behavior (Google→DuckDuckGo) plus retries on rate limits.
 
 #### 3. ProcessingNode
-**Purpose**: Process data in isolated container environment
+**Purpose**: Process data in isolated container environment and emit structured snippets plus provenance.
 
 **Inputs**:
-- search_results (raw web content)
+- `search_results` (normalized by SearchNode)
+- `language`, `history_path`
 
 **Outputs**:
-- processed_data (parsed and extracted information)
+- `processed_data` (list of dicts containing `source`, `normalized_content`, `snippets`, `key_facts`, `tables`, `provenance`, `timestamp`)
+- `errors` (only if certain documents fail but others succeed)
 
 **Processing**:
-1. Create isolated container via container-use
-2. Parse HTML/PDF documents
-3. Extract structured information
-4. Store processed data with metadata
-5. Clean up container resources
+1. Instantiate `ContainerProcessor`, which can call container-use MCP (future) or run a local fallback pipeline. Remote mode is ready via `enable_remote=True`.
+2. Deduplicate URLs and build document descriptors (`title`, `url`, `content`, `summary`, `retrieved_at`).
+3. Detect content type (PDF vs HTML vs plain text) and convert to Markdown/text (`markdownify`/`pdfminer` when available, otherwise a lightweight HTML stripper).
+4. Generate snippets (top 5 paragraphs), extract key facts (sentences containing numerics, delimiters, or bullet markers), and collect table-like blocks (`|` or tab-separated rows).
+5. Attach provenance metadata (language, retrieval timestamp, processor type) and persist human-readable logs via `HistoryManager.save_processed_data`.
+6. Surface non-fatal processor errors in `state["errors"]` while allowing downstream nodes to keep working with successful artifacts.
 
-**Design Reference**: Uses container-use for safe, isolated execution
+**Design Reference**: 基本設計書 Section 2.3/5 (container isolation) ensures heavy parsing is sandboxed; Section 4.1 describes how processed outputs feed LLM + verification nodes.
 
 #### 4. LLMNode
-**Purpose**: Generate provisional answer using local LLM
+**Purpose**: Transform processed evidence into a citation-rich provisional answer.
 
 **Inputs**:
-- query (user's question)
-- processed_data (analyzed information)
-- model_name (LLM to use)
+- `query` + `language` (determine localization and fallback)
+- `processed_data` (primary evidence) with `search_results` as backup
+- `model_name` and optional `llm_stream_callback`
+- `history_path` (writing `llm_summary.md`)
 
 **Outputs**:
-- provisional_answer (candidate response)
+- `provisional_answer` (LLM draft)
+- `llm_metadata` (model, context size, citations, prompt length, history log path)
+- Optional `errors` appended when retries/fallbacks occur
 
 **Processing**:
-1. Construct prompt with query and context
-2. Call Ollama with specified model (default: gpt-oss:20b)
-3. Parse LLM response
-4. Store provisional answer for verification
+1. `build_llm_prompt` condenses up to six processed entries into bullet summaries with `[S#]` citations and localized instructions (JA/EN).
+2. Resolve `ModelManager` (preferring any injected mock) and attempt generation with exponential backoff by shrinking context windows before falling back to English prompts.
+3. Support token streaming via `state["llm_stream_callback"]` while still returning the full response string.
+4. Persist a lightweight audit trail (`sessions/<id>/llm_summary.md`) containing the context snapshot, citations, and provisional excerpt for verification/CLI views.
+5. Return structured metadata so downstream nodes (verification/report/CLI) can trace which sources informed the draft.
 
-**Design Reference**: Uses Ollama's local LLM execution with configurable models
+**Design Reference**: 基本設計書 Section 4.1 (LLM node) & Section 6 (history). Prompt rules align with Section 4.3 (language requirements).
 
 #### 5. VerificationNode
 **Purpose**: Verify provisional answer accuracy
@@ -140,24 +155,36 @@ class AgentState(TypedDict):
 
 **Design Reference**: Implements verification loop from 基本設計書.md Section 5
 
+Additional implementation details (claim extraction heuristics, `SearchClient` contract, routing thresholds, and history output) live in [docs/verification_flow.md](verification_flow.md).
+
 #### 6. ReportNode
-**Purpose**: Generate final Markdown report
+**Purpose**: Produce localized Markdown/PDF deliverables that summarize the investigation and verification outcomes.
 
 **Inputs**:
-- provisional_answer (verified content)
-- language (output language)
-- search_results (sources)
-- verification_count (processing depth)
+- `provisional_answer` (post-verification content)
+- `language`, `model_name`, `verification_count`, `verification_summary`
+- `search_results` + `processed_data` (for deduped citations)
+- `history_path` (HistoryManager session directory) and optional `report_format`
 
 **Outputs**:
-- final_report (formatted Markdown)
+- `final_report` (Markdown)
+- `report_path` (filesystem path or empty string)
+- `report_metadata` (sources, timestamps, verification stats, PDF info)
+- Optional `errors` when persistence fails
 
 **Processing**:
-1. Format provisional_answer as Markdown
-2. Add metadata (sources, timestamp, model)
-3. Localize based on language preference
-4. Save to history_path
-5. Optionally convert to PDF
+1. `format_sources()` merges processed evidence with residual search hits, assigns stable `[S#]` IDs, and emits Markdown-ready bullets.
+2. Localized templates add Summary / Methodology / Sources / Verification / Metadata sections, embedding verification loop stats (pass counts, confidence averages, re-search recommendation).
+3. Persist Markdown through `HistoryManager.save_report` and create `report.pdf` (real PDF via reportlab when available, otherwise a clearly labeled placeholder).
+4. Surface paths + flags in `report_metadata` so the CLI can advertise Markdown/PDF artifacts immediately after generation.
+
+**Design Reference**: 基本設計書 Section 4.1 (Report node), Section 5 (verification outputs), Section 6 (history persistence).
+
+### Orchestrator & Dependency Injection
+- `src/orchestrator/workflow.py` imports the production nodes and exposes a `WorkflowDependencies` dataclass. Tests/CLI can override specific nodes or inject shared clients (`WebSearchClient`, `ContainerProcessor`, `HistoryManager`, `ModelManager`) without monkey-patching globals.
+- Every node is wrapped with structured logging plus optional `on_event` callbacks that receive `WorkflowEvent` payloads (node name, delta, timestamp). The CLI uses this to render live progress when `--verbose` is supplied.
+- `should_continue_verification` now inspects `verification_summary` (`status`, `pass_ratio`, `average_confidence`, `needs_additional_search`) and enforces `settings.verification_max_loops`, `verification_pass_ratio`, and `verification_min_confidence` before looping back to `search_node`.
+- `run_workflow` accepts either a `query` or full `messages` list along with overrides for language/model/history. When `stream=True` it returns a `WorkflowRunResult` containing the final state plus the ordered `WorkflowEvent` list; otherwise it returns the final `AgentState` dict for backwards compatibility.
 
 ## Workflow Execution Flow
 
@@ -270,22 +297,26 @@ def my_node(state: AgentState) -> dict:
 
 ### Example 1: Basic Usage
 ```python
-from src.orchestrator import run_workflow
+from orchestrator.workflow import run_workflow, WorkflowRunResult
 
-# Simple query execution
+# Simple query execution with streaming
 result = run_workflow(
     query="LangGraphについて教えて",
     language="ja",
-    model_name="gpt-oss:20b"
+    model_name="gpt-oss:20b",
+    stream=True,
 )
 
-print(result["final_report"])
+if isinstance(result, WorkflowRunResult):
+    print(result.final_state["final_report"])
+else:
+    print(result["final_report"])
 ```
 
 ### Example 2: Manual State Initialization
 ```python
-from src.state import create_initial_state
-from src.orchestrator import compile_workflow
+from state.agent_state import create_initial_state
+from orchestrator.workflow import compile_workflow
 
 # Create initial state
 initial_state = create_initial_state(
@@ -307,7 +338,7 @@ print(f"Final report:\n{result['final_report']}")
 
 ### Example 3: Accessing Workflow Graph
 ```python
-from src.orchestrator import create_workflow
+from orchestrator.workflow import create_workflow
 
 # Create workflow
 workflow = create_workflow()
@@ -324,7 +355,7 @@ print("Edges:", graph.edges)
 
 ### Example 4: Visualization
 ```python
-from src.orchestrator import visualize_workflow
+from orchestrator.workflow import visualize_workflow
 
 # Generate workflow visualization
 visualize_workflow("docs/workflow_diagram.png")
@@ -332,8 +363,8 @@ visualize_workflow("docs/workflow_diagram.png")
 
 ### Example 5: Streaming Execution
 ```python
-from src.state import create_initial_state
-from src.orchestrator import compile_workflow
+from state.agent_state import create_initial_state
+from orchestrator.workflow import compile_workflow
 
 initial_state = create_initial_state(query="Research topic")
 app = compile_workflow()
@@ -367,8 +398,8 @@ result = app.invoke(None, config)  # Continues from last checkpoint
 
 ### Unit Testing Nodes
 ```python
-from src.orchestrator import input_node
-from src.state import create_initial_state
+from nodes.input_node import input_node
+from state.agent_state import create_initial_state
 
 # Test individual node
 state = create_initial_state(query="test query")
@@ -380,8 +411,8 @@ print("Node test passed")
 
 ### Integration Testing Workflow
 ```python
-from src.orchestrator import compile_workflow
-from src.state import create_initial_state
+from orchestrator.workflow import compile_workflow
+from state.agent_state import create_initial_state
 
 # Test complete workflow
 app = compile_workflow()

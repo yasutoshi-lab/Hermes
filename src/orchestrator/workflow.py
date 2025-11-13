@@ -1,502 +1,324 @@
 """
-LangGraph Workflow for Research Analyst Agent
+LangGraph Workflow for the Hermes Research Analyst Agent.
 
-This module defines the workflow graph structure that orchestrates the research
-analyst agent. The workflow consists of multiple nodes that process user queries,
-search for information, verify results, and generate final reports.
-
-Design Reference:
-    基本設計書.md Section 4.1 - Node Configuration
-    基本設計書.md Section 5 - Processing Flow
+This module wires the production node implementations into a StateGraph and
+exposes helper APIs for CLI/integration layers. It supports dependency injection
+so tests and alternative frontends can override node behavior or provide custom
+clients (Search, Container, Model, etc.) without patching global modules.
 """
 
-from typing import Literal
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from functools import partial
+from typing import Any, Callable, Dict, List, Literal, Optional
+from uuid import uuid4
+
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
-from src.state import AgentState, add_error, increment_verification_count
+from config import settings
+from nodes.input_node import input_node as default_input_node
+from nodes.search_node import search_node as default_search_node
+from nodes.processing_node import processing_node as default_processing_node
+from nodes.llm_node import llm_node as default_llm_node
+from nodes.verification_node import verification_node as default_verification_node
+from nodes.report_node import report_node as default_report_node
+from state.agent_state import AgentState, NodeFunction, create_initial_state
+
+logger = logging.getLogger(__name__)
 
 
-# ============================================================================
-# Node Implementations (Stub Functions)
-# ============================================================================
+@dataclass
+class WorkflowEvent:
+    """Lightweight structure describing node-level updates emitted by the graph."""
 
-def input_node(state: AgentState) -> dict:
+    node: str
+    payload: Dict[str, Any]
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class WorkflowRunResult:
+    """Return type when `run_workflow` is executed in streaming mode."""
+
+    final_state: AgentState
+    events: List[WorkflowEvent]
+
+
+@dataclass
+class WorkflowDependencies:
     """
-    Input Node: Receives user prompt and configuration.
+    Optional dependency overrides for the workflow.
 
-    This node processes the initial user input, validates the query, and sets up
-    the initial state configuration. It extracts the query, language preference,
-    and model selection from user input.
-
-    Args:
-        state: Current agent state
-
-    Returns:
-        dict: State updates with validated input
-
-    Processing Steps:
-        1. Extract query from messages or state
-        2. Detect or validate language setting
-        3. Validate model_name is available
-        4. Set up history_path if not already set
-
-    Design Reference:
-        基本設計書.md Section 4.1 - InputNode
+    Attributes:
+        input_node: Custom input node callable
+        search_node: Custom search node callable
+        processing_node: Custom processing node callable
+        llm_node: Custom llm node callable
+        verification_node: Custom verification node callable
+        report_node: Custom report node callable
+        search_client: Shared WebSearchClient instance injected into SearchNode
+        container_processor: ContainerProcessor injected into ProcessingNode
+        history_manager: HistoryManager shared across nodes that persist history
+        model_manager: ModelManager shared with LLM node (set on state)
+        on_event: Callback fired after each node execution with WorkflowEvent payload
     """
-    print("[InputNode] Processing user input...")
 
-    # Stub implementation: validate that we have a query
-    if not state.get("query"):
-        return add_error(state, "No query provided")
+    input_node: Optional[NodeFunction] = None
+    search_node: Optional[NodeFunction] = None
+    processing_node: Optional[NodeFunction] = None
+    llm_node: Optional[NodeFunction] = None
+    verification_node: Optional[NodeFunction] = None
+    report_node: Optional[NodeFunction] = None
+    search_client: Optional[Any] = None
+    container_processor: Optional[Any] = None
+    history_manager: Optional[Any] = None
+    model_manager: Optional[Any] = None
+    on_event: Optional[Callable[[WorkflowEvent], None]] = None
 
-    # In real implementation, would extract query from messages,
-    # detect language, validate model availability, etc.
 
-    return {
-        "messages": [{"role": "system", "content": f"Processing query: {state['query']}"}]
+def _wrap_node_with_logging(
+    name: str,
+    fn: NodeFunction,
+    event_hook: Optional[Callable[[WorkflowEvent], None]],
+) -> NodeFunction:
+    def wrapper(state: AgentState) -> Dict[str, Any]:
+        logger.info("Workflow[%s]: start", name)
+        result = fn(state)
+        logger.info("Workflow[%s]: completed (keys=%s)", name, ", ".join(result.keys()))
+        if event_hook:
+            event_hook(WorkflowEvent(node=name, payload=result))
+        return result
+
+    return wrapper
+
+
+def _inject_model_manager(fn: NodeFunction, manager: Any | None) -> NodeFunction:
+    if manager is None:
+        return fn
+
+    def runner(state: AgentState) -> Dict[str, Any]:
+        state["model_manager"] = manager  # type: ignore[index]
+        return fn(state)
+
+    return runner
+
+
+def _build_node_registry(deps: WorkflowDependencies) -> Dict[str, NodeFunction]:
+    registry: Dict[str, NodeFunction] = {
+        "input_node": deps.input_node
+        or partial(default_input_node, history_manager=deps.history_manager),
+        "search_node": deps.search_node
+        or partial(
+            default_search_node,
+            client=deps.search_client,
+            history_manager=deps.history_manager,
+        ),
+        "processing_node": deps.processing_node
+        or partial(
+            default_processing_node,
+            processor=deps.container_processor,
+            history_manager=deps.history_manager,
+        ),
+        "llm_node": deps.llm_node
+        or _inject_model_manager(default_llm_node, deps.model_manager),
+        "verification_node": deps.verification_node or default_verification_node,
+        "report_node": deps.report_node or default_report_node,
     }
+    return registry
 
-
-def search_node(state: AgentState) -> dict:
-    """
-    Search Node: Performs web search using web-search-mcp.
-
-    This node calls the full-web-search or get-web-search-summaries tool from
-    web-search-mcp to gather relevant information for the user's query. It handles
-    search failures and can retry with adjusted parameters.
-
-    Args:
-        state: Current agent state with query
-
-    Returns:
-        dict: State updates with search_results
-
-    Processing Steps:
-        1. Extract query from state
-        2. Call web-search-mcp full-web-search tool
-        3. Parse and store results with title, URL, content
-        4. Handle search failures with fallback strategies
-
-    Design Reference:
-        基本設計書.md Section 4.1 - SearchNode
-        基本設計書.md Section 2.2 - Web Search MCP Server
-    """
-    print(f"[SearchNode] Searching for: {state.get('query', 'N/A')}")
-
-    # Stub implementation: simulate search results
-    stub_results = [
-        {
-            "title": "LangGraph Documentation",
-            "url": "https://langchain-ai.github.io/langgraph/",
-            "description": "Official LangGraph documentation",
-            "content": "LangGraph is a library for building stateful, multi-actor applications..."
-        }
-    ]
-
-    return {
-        "search_results": stub_results,
-        "messages": [{"role": "system", "content": f"Found {len(stub_results)} search results"}]
-    }
-
-
-def processing_node(state: AgentState) -> dict:
-    """
-    Processing Node: Processes data in isolated container environment.
-
-    This node uses container-use to safely process search results in an isolated
-    environment. It parses documents, extracts structured data, and performs any
-    necessary transformations without affecting the host system.
-
-    Args:
-        state: Current agent state with search_results
-
-    Returns:
-        dict: State updates with processed_data
-
-    Processing Steps:
-        1. Retrieve search_results from state
-        2. Create isolated container environment
-        3. Parse and extract relevant information
-        4. Store processed data with metadata
-        5. Clean up container resources
-
-    Design Reference:
-        基本設計書.md Section 4.1 - ProcessingNode
-        基本設計書.md Section 2.3 - Container Use
-    """
-    print("[ProcessingNode] Processing data in container...")
-
-    search_results = state.get("search_results", [])
-
-    # Stub implementation: simulate processed data
-    stub_processed = [
-        {
-            "source": result.get("url", "unknown"),
-            "extracted_info": f"Processed: {result.get('title', 'N/A')}",
-            "timestamp": "2025-11-13T20:41:00Z"
-        }
-        for result in search_results
-    ]
-
-    return {
-        "processed_data": stub_processed,
-        "messages": [{"role": "system", "content": f"Processed {len(stub_processed)} documents"}]
-    }
-
-
-def llm_node(state: AgentState) -> dict:
-    """
-    LLM Node: Generates provisional answer using local LLM.
-
-    This node calls the local LLM (default: gpt-oss:20b via Ollama) to analyze
-    processed data and generate a provisional answer. The answer is based on
-    search results and processed information.
-
-    Args:
-        state: Current agent state with processed_data
-
-    Returns:
-        dict: State updates with provisional_answer
-
-    Processing Steps:
-        1. Retrieve processed_data and query
-        2. Construct prompt for LLM with context
-        3. Call Ollama with specified model_name
-        4. Parse LLM response and extract answer
-        5. Store provisional answer for verification
-
-    Design Reference:
-        基本設計書.md Section 4.1 - LLMNode
-        基本設計書.md Section 2.4 - LLM and Ollama
-    """
-    print(f"[LLMNode] Generating answer with model: {state.get('model_name', 'N/A')}")
-
-    # Stub implementation: simulate LLM response
-    query = state.get("query", "")
-    processed_count = len(state.get("processed_data", []))
-
-    stub_answer = f"""
-Based on the analysis of {processed_count} sources regarding "{query}":
-
-[Provisional Answer]
-This is a stub implementation. In production, this would contain the actual
-LLM-generated response based on processed data and search results.
-
-Key findings:
-- Information extracted from web search
-- Analysis from container processing
-- Synthesized answer to user query
-"""
-
-    return {
-        "provisional_answer": stub_answer,
-        "messages": [{"role": "assistant", "content": "Generated provisional answer"}]
-    }
-
-
-def verification_node(state: AgentState) -> dict:
-    """
-    Verification Node: Verifies provisional answer accuracy.
-
-    This node examines the provisional answer for factual accuracy, consistency,
-    and completeness. It may trigger additional search loops if verification fails
-    or information is insufficient.
-
-    Args:
-        state: Current agent state with provisional_answer
-
-    Returns:
-        dict: State updates with verification results and incremented count
-
-    Processing Steps:
-        1. Extract key claims from provisional_answer
-        2. Cross-reference with search_results
-        3. Identify contradictions or missing information
-        4. Increment verification_count
-        5. Determine if another search loop is needed
-
-    Design Reference:
-        基本設計書.md Section 4.1 - VerificationNode
-        基本設計書.md Section 5 - Verification Loop
-    """
-    print("[VerificationNode] Verifying answer accuracy...")
-
-    current_count = state.get("verification_count", 0)
-    update = increment_verification_count(state)
-
-    # Stub implementation: simple verification logic
-    # In production, would perform actual fact-checking
-    verification_passed = current_count >= 1  # Pass after first verification
-
-    update["messages"] = [
-        {
-            "role": "system",
-            "content": f"Verification loop {current_count + 1}: {'Passed' if verification_passed else 'Needs refinement'}"
-        }
-    ]
-
-    return update
-
-
-def report_node(state: AgentState) -> dict:
-    """
-    Report Node: Generates final Markdown report.
-
-    This node takes the verified provisional answer and formats it as a final
-    Markdown report in the user's preferred language. The report is saved to
-    the history path and returned to the user.
-
-    Args:
-        state: Current agent state with verified provisional_answer
-
-    Returns:
-        dict: State updates with final_report
-
-    Processing Steps:
-        1. Retrieve provisional_answer and language
-        2. Format answer as Markdown report
-        3. Add metadata (sources, timestamp, etc.)
-        4. Save to history_path
-        5. Optionally convert to PDF
-
-    Design Reference:
-        基本設計書.md Section 4.1 - ReportNode
-        基本設計書.md Section 6 - History Management
-    """
-    print("[ReportNode] Generating final report...")
-
-    provisional = state.get("provisional_answer", "")
-    language = state.get("language", "ja")
-    query = state.get("query", "")
-
-    # Stub implementation: format as Markdown report
-    report_title = "研究レポート" if language == "ja" else "Research Report"
-
-    stub_report = f"""# {report_title}
-
-## Query
-{query}
-
-## Summary
-{provisional}
-
-## Sources
-{len(state.get('search_results', []))} sources analyzed
-
-## Verification
-Completed {state.get('verification_count', 0)} verification loops
-
----
-Generated by Research Analyst Agent
-Model: {state.get('model_name', 'N/A')}
-"""
-
-    return {
-        "final_report": stub_report,
-        "messages": [{"role": "assistant", "content": "Final report generated"}]
-    }
-
-
-# ============================================================================
-# Conditional Edge Functions
-# ============================================================================
 
 def should_continue_verification(state: AgentState) -> Literal["search_node", "report_node"]:
     """
-    Conditional edge: Determines if verification loop should continue.
+    Decide whether another verification loop should trigger a re-search.
 
-    This function decides whether the workflow should return to search_node for
-    additional information gathering or proceed to report_node for final output.
-
-    Args:
-        state: Current agent state with verification results
-
-    Returns:
-        str: Next node name - either "search_node" or "report_node"
-
-    Decision Logic:
-        - If verification_count < max_loops AND verification failed: -> search_node
-        - Otherwise: -> report_node
-
-    Design Reference:
-        基本設計書.md Section 4.1 - Verification Loop
+    Decision factors:
+        - verification_summary.needs_additional_search (explicit signal)
+        - pass ratio vs. settings.verification_pass_ratio
+        - average confidence vs. settings.verification_min_confidence
+        - maximum loop guard (settings.verification_max_loops)
     """
     verification_count = state.get("verification_count", 0)
-    max_verification_loops = 3  # Configurable limit
+    summary = state.get("verification_summary") or {}
 
-    # Stub logic: continue if under limit and verification suggests need
-    # In production, would check actual verification results
-    if verification_count < max_verification_loops:
-        # Check if verification indicated need for more search
-        # For stub: only do one verification loop
-        if verification_count < 1:
-            return "search_node"
+    needs_additional = bool(summary.get("needs_additional_search"))
+    status = summary.get("status") or state.get("verification_status")
+    pass_ratio = summary.get("pass_ratio")
+    avg_confidence = summary.get("average_confidence")
+
+    should_retry = needs_additional or status in {"fail", "retry"}
+
+    if pass_ratio is not None and pass_ratio < settings.verification_pass_ratio:
+        should_retry = True
+
+    if (
+        avg_confidence is not None
+        and avg_confidence < settings.verification_min_confidence
+    ):
+        should_retry = True
+
+    if should_retry and verification_count < settings.verification_max_loops:
+        return "search_node"
 
     return "report_node"
 
 
-# ============================================================================
-# Workflow Creation
-# ============================================================================
-
-def create_workflow() -> StateGraph:
+def create_workflow(
+    dependencies: Optional[WorkflowDependencies] = None,
+) -> StateGraph:
     """
-    Creates and compiles the LangGraph workflow.
-
-    This function builds the complete workflow graph by:
-    1. Creating a StateGraph with AgentState
-    2. Adding all node functions
-    3. Defining edges between nodes
-    4. Setting up conditional routing
-    5. Compiling with checkpoint support
-
-    Returns:
-        StateGraph: Compiled workflow ready for execution
-
-    Workflow Structure:
-        START → input_node → search_node → processing_node → llm_node →
-        verification_node → [conditional: search_node OR report_node] → END
-
-    Design Reference:
-        基本設計書.md Section 4 - LangGraph Workflow Design
-
-    Example:
-        >>> workflow = create_workflow()
-        >>> result = workflow.invoke({"query": "LangGraphについて", "language": "ja"})
-        >>> print(result["final_report"])
+    Build the LangGraph workflow with optional dependency overrides.
     """
-    # Initialize the StateGraph with our AgentState type
+    deps = dependencies or WorkflowDependencies()
     workflow = StateGraph(AgentState)
+    registry = _build_node_registry(deps)
 
-    # Add all nodes
-    workflow.add_node("input_node", input_node)
-    workflow.add_node("search_node", search_node)
-    workflow.add_node("processing_node", processing_node)
-    workflow.add_node("llm_node", llm_node)
-    workflow.add_node("verification_node", verification_node)
-    workflow.add_node("report_node", report_node)
+    for name, fn in registry.items():
+        workflow.add_node(name, _wrap_node_with_logging(name, fn, deps.on_event))
 
-    # Define the graph edges
-    # Linear flow: input → search → processing → llm → verification
     workflow.add_edge("input_node", "search_node")
     workflow.add_edge("search_node", "processing_node")
     workflow.add_edge("processing_node", "llm_node")
     workflow.add_edge("llm_node", "verification_node")
-
-    # Conditional edge: verification can loop back or proceed to report
     workflow.add_conditional_edges(
         "verification_node",
         should_continue_verification,
         {
             "search_node": "search_node",
-            "report_node": "report_node"
-        }
+            "report_node": "report_node",
+        },
     )
-
-    # Report node leads to END
     workflow.add_edge("report_node", END)
-
-    # Set the entry point
     workflow.set_entry_point("input_node")
-
     return workflow
 
 
-def compile_workflow() -> StateGraph:
+def compile_workflow(
+    dependencies: Optional[WorkflowDependencies] = None,
+) -> StateGraph:
     """
-    Compiles the workflow with checkpointing enabled.
-
-    This function creates the workflow and compiles it with MemorySaver for
-    checkpoint support, enabling durable execution and recovery.
-
-    Returns:
-        StateGraph: Compiled workflow with checkpointing
-
-    Example:
-        >>> app = compile_workflow()
-        >>> config = {"configurable": {"thread_id": "session_001"}}
-        >>> result = app.invoke(initial_state, config)
+    Compile the workflow with an in-memory checkpoint.
     """
-    workflow = create_workflow()
-
-    # Compile with memory checkpointing for durable execution
+    workflow = create_workflow(dependencies)
     checkpointer = MemorySaver()
-    compiled = workflow.compile(checkpointer=checkpointer)
-
-    return compiled
+    return workflow.compile(checkpointer=checkpointer)
 
 
-def visualize_workflow(output_path: str = "workflow_graph.png") -> None:
+def visualize_workflow(
+    output_path: str = "workflow_graph.png",
+    dependencies: Optional[WorkflowDependencies] = None,
+) -> None:
     """
-    Visualizes the workflow graph structure.
-
-    Creates a visual representation of the workflow graph showing all nodes
-    and edges. Requires graphviz to be installed.
-
-    Args:
-        output_path: Path where the visualization should be saved
-
-    Example:
-        >>> visualize_workflow("docs/workflow.png")
-
-    Note:
-        This function requires the graphviz package and system dependencies.
-        Install with: pip install graphviz && apt-get install graphviz (Linux)
+    Create a PNG visualization of the workflow graph.
     """
     try:
-        workflow = create_workflow()
-        # LangGraph provides get_graph() for visualization
+        workflow = create_workflow(dependencies)
         graph = workflow.get_graph()
-
-        # Draw the graph (requires graphviz)
         png_data = graph.draw_mermaid_png()
-
-        with open(output_path, "wb") as f:
-            f.write(png_data)
-
-        print(f"Workflow visualization saved to: {output_path}")
-
+        with open(output_path, "wb") as handle:
+            handle.write(png_data)
+        logger.info("Workflow visualization saved to %s", output_path)
     except ImportError:
-        print("Warning: graphviz not installed. Skipping visualization.")
-        print("Install with: pip install graphviz")
-    except Exception as e:
-        print(f"Error creating visualization: {e}")
+        logger.warning("graphviz is not available. Skipping visualization.")
+    except Exception as exc:
+        logger.error("Failed to visualize workflow: %s", exc)
 
 
-# ============================================================================
-# Workflow Execution Helpers
-# ============================================================================
+def _prepare_initial_state(
+    query: Optional[str],
+    messages: Optional[List[dict]],
+    language: Optional[str],
+    model_name: Optional[str],
+    history_path: Optional[str],
+    model_manager: Any | None,
+) -> AgentState:
+    if not messages and not query:
+        raise ValueError("Either 'query' or 'messages' must be supplied.")
 
-def run_workflow(query: str, language: str = "ja", model_name: str = "gpt-oss:20b") -> dict:
+    resolved_language = (language or settings.default_language).lower()
+    resolved_model = (model_name or settings.default_model).strip() or settings.default_model
+    resolved_query = (query or "").strip()
+
+    computed_messages = messages or [{"role": "user", "content": resolved_query}]
+    state: AgentState = create_initial_state(
+        query=resolved_query,
+        language=resolved_language,
+        model_name=resolved_model,
+        history_path=history_path or "",
+    )
+    state["messages"] = computed_messages  # type: ignore[index]
+
+    if model_manager is not None:
+        state["model_manager"] = model_manager  # type: ignore[index]
+
+    return state
+
+
+def run_workflow(
+    query: Optional[str] = None,
+    *,
+    messages: Optional[List[dict]] = None,
+    language: Optional[str] = None,
+    model_name: Optional[str] = None,
+    history_path: Optional[str] = None,
+    stream: bool = False,
+    dependencies: Optional[WorkflowDependencies] = None,
+    thread_id: Optional[str] = None,
+) -> AgentState | WorkflowRunResult:
     """
-    Convenience function to run the workflow with a query.
+    Convenience helper for executing the workflow from CLI/tests.
 
     Args:
-        query: User's research query
-        language: Preferred language ('ja' or 'en')
-        model_name: LLM model to use
-
-    Returns:
-        dict: Final state with completed report
-
-    Example:
-        >>> result = run_workflow("LangGraphの使い方", language="ja")
-        >>> print(result["final_report"])
+        query: User query when bypassing the InputNode message extraction.
+        messages: LangChain-style message history; overrides query if provided.
+        language: Preferred language (defaults to settings).
+        model_name: Override for the LLM model.
+        history_path: Existing session directory to reuse (optional).
+        stream: When True, return WorkflowRunResult with node events.
+        dependencies: Optional WorkflowDependencies for DI/mocking.
+        thread_id: LangGraph thread identifier; auto-generated if omitted.
     """
-    from src.state import create_initial_state
-
-    # Create initial state
-    initial_state = create_initial_state(
+    deps = dependencies or WorkflowDependencies()
+    initial_state = _prepare_initial_state(
         query=query,
+        messages=messages,
         language=language,
-        model_name=model_name
+        model_name=model_name,
+        history_path=history_path,
+        model_manager=deps.model_manager,
     )
 
-    # Compile and run workflow
-    app = compile_workflow()
-    config = {"configurable": {"thread_id": f"session_{query[:20]}"}}
+    compiled = compile_workflow(dependencies=deps)
+    computed_thread_id = thread_id or initial_state.get("history_path") or f"run_{uuid4().hex[:8]}"
+    config = {"configurable": {"thread_id": str(computed_thread_id)}}
 
-    result = app.invoke(initial_state, config)
+    if not stream:
+        return compiled.invoke(initial_state, config)
 
-    return result
+    events: List[WorkflowEvent] = []
+    current_state: AgentState = dict(initial_state)  # type: ignore[assignment]
+
+    for chunk in compiled.stream(initial_state, config):
+        if not chunk:
+            continue
+        node_name, update = next(iter(chunk.items()))
+        if isinstance(update, dict):
+            current_state.update(update)
+        events.append(WorkflowEvent(node=node_name, payload=update))
+
+    return WorkflowRunResult(final_state=current_state, events=events)
+
+
+__all__ = [
+    "WorkflowDependencies",
+    "WorkflowEvent",
+    "WorkflowRunResult",
+    "create_workflow",
+    "compile_workflow",
+    "visualize_workflow",
+    "run_workflow",
+    "should_continue_verification",
+]
