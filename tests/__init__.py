@@ -1,1 +1,0 @@
-"""Hermes tests package."""
