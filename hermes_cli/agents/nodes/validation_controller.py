@@ -22,7 +22,13 @@ def validation_controller(state: HermesState) -> HermesState:
     Returns:
         Updated state with validation completion flag
     """
-    logger.info(f"Validation controller: loop {state.loop_count}/{state.max_validation}")
+    logger.info(
+        "Validation controller: loop %s/%s (quality=%.2f threshold=%.2f)",
+        state.loop_count,
+        state.max_validation,
+        state.quality_score,
+        state.quality_threshold,
+    )
 
     # Check if we've done minimum loops
     if state.loop_count < state.min_validation:
@@ -36,15 +42,41 @@ def validation_controller(state: HermesState) -> HermesState:
         state.validation_complete = True
         return state
 
-    # TODO: Add quality check logic here
-    # Could analyze draft for:
-    # - Completeness
-    # - Citation quality
-    # - Answer accuracy
-    # - Structure quality
+    # Evaluate draft quality heuristically
+    quality_score = _evaluate_quality(state)
+    state.quality_score = quality_score
 
-    # For now, just complete after min loops
-    logger.info("Validation complete (minimum satisfied)")
-    state.validation_complete = True
+    if quality_score >= state.quality_threshold:
+        logger.info("Validation complete (quality threshold met: %.2f)", quality_score)
+        state.validation_complete = True
+    else:
+        logger.info("Continuing validation (quality %.2f below threshold %.2f)", quality_score, state.quality_threshold)
+        state.validation_complete = False
 
     return state
+
+
+def _evaluate_quality(state: HermesState) -> float:
+    """Compute a heuristic quality score for the current draft."""
+    draft = state.draft_report or ""
+    draft_score = min(len(draft) / 1200.0, 1.0)
+
+    if state.queries:
+        processed = len([v for v in state.processed_notes.values() if v.strip()])
+        coverage_score = min(processed / len(state.queries), 1.0)
+    else:
+        coverage_score = 0.0
+
+    total_sources = sum(len(results) for results in state.query_results.values())
+    max_possible_sources = max(1, len(state.executed_queries or state.queries) * state.max_sources)
+    source_score = min(total_sources / max_possible_sources, 1.0)
+
+    loop_bonus = min(state.loop_count / max(1, state.max_validation), 1.0)
+
+    return round(
+        0.35 * draft_score +
+        0.25 * coverage_score +
+        0.25 * source_score +
+        0.15 * loop_bonus,
+        3,
+    )

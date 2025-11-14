@@ -35,6 +35,9 @@ def container_processor(state: HermesState) -> HermesState:
 
                 # Extract content from results
                 texts = [r["content"] for r in results if r.get("content")]
+                if not texts:
+                    logger.warning("No textual content found for query '%s'", query)
+                    continue
 
                 try:
                     # Normalize texts in container
@@ -42,7 +45,13 @@ def container_processor(state: HermesState) -> HermesState:
 
                     # Combine into single note
                     combined = "\n\n".join(normalized)
-                    state.processed_notes[query] = combined
+                    if state.loop_count > 0 and state.processed_notes.get(query):
+                        loop_header = f"\n\n[Loop {state.loop_count}]\n"
+                        state.processed_notes[query] = (
+                            state.processed_notes[query] + loop_header + combined
+                        )
+                    else:
+                        state.processed_notes[query] = combined
 
                     logger.info(f"Processed content for query: {query}")
 

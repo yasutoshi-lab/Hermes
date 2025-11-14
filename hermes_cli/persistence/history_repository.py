@@ -7,7 +7,7 @@ providing operations for saving, loading, listing, and managing historical task 
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Literal
 import yaml
 import shutil
 
@@ -28,6 +28,8 @@ class HistoryMeta:
         validation_loops: Number of validation loops executed
         source_count: Total number of sources collected
         report_file: Filename of the report markdown file
+        status: Execution status ("success" or "failed")
+        error_message: Optional error message for failed runs
     """
     id: str
     prompt: str
@@ -38,6 +40,8 @@ class HistoryMeta:
     validation_loops: int
     source_count: int
     report_file: str
+    status: Literal["success", "failed"] = "success"
+    error_message: Optional[str] = None
 
 
 class HistoryRepository:
@@ -116,6 +120,8 @@ class HistoryRepository:
             validation_loops=data['validation_loops'],
             source_count=data['source_count'],
             report_file=data['report_file'],
+            status=data.get('status', "success"),
+            error_message=data.get('error_message'),
         )
 
     def load_report(self, task_id: str) -> Optional[str]:

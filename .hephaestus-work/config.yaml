@@ -1,13 +1,13 @@
 version: '1.0'
-agent_type: claude
+agent_type: codex
 agents:
   master:
     enabled: true
-    command: claude --dangerously-skip-permissions
+    command: codex --dangerously-bypass-approvals-and-sandbox
     args: []
   workers:
     count: 3
-    command: claude --dangerously-skip-permissions
+    command: codex --dangerously-bypass-approvals-and-sandbox
     args: []
 monitoring:
   health_check_interval: 30

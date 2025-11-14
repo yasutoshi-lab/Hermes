@@ -13,6 +13,7 @@ from hermes_cli.commands import (
     log_command,
     history_command,
     debug_command,
+    queue_command,
 )
 
 app = typer.Typer(
@@ -28,16 +29,22 @@ app.command("run")(run_command)
 app.command("log")(log_command)
 app.command("history")(history_command)
 app.command("debug")(debug_command)
+app.command("queue")(queue_command)
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def callback(
+    ctx: typer.Context,
     version: bool = typer.Option(False, "--version", help="Show version"),
 ):
     """Hermes CLI - Information Gathering Agent"""
     if version:
         from hermes_cli import __version__
         typer.echo(f"Hermes CLI version: {__version__}")
+        raise typer.Exit()
+
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
         raise typer.Exit()
 
 

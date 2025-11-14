@@ -4,7 +4,9 @@ This module provides workflow execution and orchestration operations,
 including running tasks and managing the execution lifecycle.
 """
 
-from typing import Optional, Dict, Any
+from __future__ import annotations
+
+from typing import Callable, Optional, Dict, Any
 from datetime import datetime
 import logging
 import random
@@ -15,17 +17,24 @@ from hermes_cli.persistence.history_repository import HistoryMeta, HistoryReposi
 from hermes_cli.persistence.log_repository import LogRepository
 from hermes_cli.services.config_service import ConfigService
 from hermes_cli.agents import create_hermes_workflow, HermesState
+from hermes_cli.tools.ollama_client import OllamaClient, OllamaConfig as OllamaClientConfig
 
 
 class RunService:
     """Service for executing Hermes tasks and workflows."""
 
-    def __init__(self, file_paths: Optional[FilePaths] = None):
+    def __init__(
+        self,
+        file_paths: Optional[FilePaths] = None,
+        ollama_client_factory: Optional[Callable[[OllamaClientConfig], OllamaClient]] = None,
+    ):
         """
         Initialize run service.
 
         Args:
             file_paths: File path manager (uses default if not provided)
+            ollama_client_factory: Optional factory for creating Ollama clients
+                                   (enables dependency injection in tests)
         """
         self.file_paths = file_paths or FilePaths()
         self.config_service = ConfigService(self.file_paths)
@@ -33,8 +42,14 @@ class RunService:
         self.history_repository = HistoryRepository(self.file_paths)
         self.log_repository = LogRepository(self.file_paths)
         self.logger = logging.getLogger(__name__)
+        self.ollama_client_factory = ollama_client_factory or (lambda cfg: OllamaClient(cfg))
 
-    def run_prompt(self, prompt: str, options: Optional[Dict[str, Any]] = None) -> HistoryMeta:
+    def run_prompt(
+        self,
+        prompt: str,
+        options: Optional[Dict[str, Any]] = None,
+        task_id: Optional[str] = None,
+    ) -> HistoryMeta:
         """
         Execute a single-shot research task from a prompt.
 
@@ -44,6 +59,11 @@ class RunService:
                     Keys: api, model, retry, timeout, language,
                          min_validation, max_validation, query_count,
                          min_sources, max_sources
+
+        Args:
+            prompt: User query/prompt
+            options: Optional configuration overrides
+            task_id: Optional externally provided task ID (used for scheduled tasks)
 
         Returns:
             History metadata for the completed run
@@ -59,16 +79,24 @@ class RunService:
             config = self.config_service.apply_overrides(config, options)
 
         # Generate task ID for this run
-        task_id = self._generate_run_id()
+        run_id = task_id or self._generate_run_id()
+        state: Optional[HermesState] = None
 
         # Initialize logging
         self.log_repository.write_log(
             "INFO", "RUN", f"Starting task execution",
-            task_id=task_id, prompt=prompt[:50]
+            task_id=run_id, prompt=prompt[:50]
         )
 
         try:
             # Create initial state
+            ollama_config = OllamaClientConfig(
+                api_base=config.ollama.api_base,
+                model=config.ollama.model,
+                retry=config.ollama.retry,
+                timeout_sec=config.ollama.timeout_sec,
+            )
+
             state = HermesState(
                 user_prompt=prompt,
                 language=options.get('language', config.language),
@@ -76,6 +104,9 @@ class RunService:
                 max_validation=options.get('max_validation', config.validation.max_loops),
                 min_sources=options.get('min_sources', config.search.min_sources),
                 max_sources=options.get('max_sources', config.search.max_sources),
+                query_count=options.get('query_count') or 3,
+                ollama_config=ollama_config,
+                ollama_client_factory=self.ollama_client_factory,
             )
 
             # Execute workflow
@@ -95,7 +126,7 @@ class RunService:
             finished_at = datetime.now()
 
             history_meta = HistoryMeta(
-                id=task_id,
+                id=run_id,
                 prompt=prompt,
                 created_at=created_at,
                 finished_at=finished_at,
@@ -103,15 +134,16 @@ class RunService:
                 language=state.language,
                 validation_loops=state.loop_count,
                 source_count=sum(len(r) for r in result_state.query_results.values()),
-                report_file=f"report-{task_id}.md",
+                report_file=f"report-{run_id}.md",
+                status="success",
             )
 
-            self.history_repository.save_report(task_id, result_state.validated_report)
+            self.history_repository.save_report(run_id, result_state.validated_report)
             self.history_repository.save_meta(history_meta)
 
             self.log_repository.write_log(
                 "INFO", "RUN", "Task execution completed",
-                task_id=task_id, sources=history_meta.source_count
+                task_id=run_id, sources=history_meta.source_count
             )
 
             return history_meta
@@ -119,8 +151,9 @@ class RunService:
         except Exception as e:
             self.log_repository.write_log(
                 "ERROR", "RUN", f"Task execution failed: {str(e)}",
-                task_id=task_id
+                task_id=run_id
             )
+            self._record_failure_meta(run_id, prompt, config, state, str(e))
             raise RuntimeError(f"Execution failed: {str(e)}") from e
 
     def run_task(self, task_id: str) -> HistoryMeta:
@@ -146,7 +179,7 @@ class RunService:
 
         try:
             # Execute using task prompt and options
-            history_meta = self.run_prompt(task.prompt, task.options)
+            history_meta = self.run_prompt(task.prompt, task.options, task_id=task_id)
 
             # Update task status to done
             self.task_repository.update_status(task_id, "done")
@@ -175,3 +208,43 @@ class RunService:
         num = random.randint(1, 9999)
 
         return f"{year}-{num:04d}"
+
+    def _record_failure_meta(
+        self,
+        run_id: str,
+        prompt: str,
+        config,
+        state: Optional[HermesState],
+        error_message: str,
+    ) -> None:
+        """Persist failure metadata so history reflects unsuccessful runs."""
+        now = datetime.now()
+        language = state.language if state else config.language
+        validation_loops = state.loop_count if state else 0
+        source_count = 0
+
+        if state:
+            try:
+                source_count = sum(len(r) for r in state.query_results.values())
+            except Exception:
+                source_count = 0
+
+        failure_meta = HistoryMeta(
+            id=run_id,
+            prompt=prompt,
+            created_at=now,
+            finished_at=now,
+            model=config.ollama.model,
+            language=language,
+            validation_loops=validation_loops,
+            source_count=source_count,
+            report_file="",
+            status="failed",
+            error_message=error_message[:500],
+        )
+
+        try:
+            self.history_repository.save_meta(failure_meta)
+            self.logger.warning("Recorded failure metadata for %s", run_id)
+        except Exception as exc:
+            self.logger.error("Failed to store failure metadata for %s: %s", run_id, exc)

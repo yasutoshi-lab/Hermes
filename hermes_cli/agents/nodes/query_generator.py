@@ -4,58 +4,67 @@ This node generates multiple search queries from the user prompt using LLM,
 creating diverse queries to gather comprehensive information.
 """
 
-from hermes_cli.agents.state import HermesState
-from hermes_cli.tools import OllamaClient, OllamaConfig
+from __future__ import annotations
+
 import logging
+import re
+from typing import List
+
+from hermes_cli.agents.state import HermesState
 
 logger = logging.getLogger(__name__)
 
 
 def query_generator(state: HermesState) -> HermesState:
-    """Generate multiple search queries from user prompt using LLM.
-
-    Creates 3-5 diverse search queries that will help gather
-    comprehensive information for the research question.
-
-    Args:
-        state: Current workflow state
-
-    Returns:
-        Updated state with generated queries
-    """
+    """Generate multiple search queries from user prompt using LLM."""
     logger.info("Generating search queries from prompt")
 
-    # TODO: Get Ollama config from somewhere (will be provided by run_service)
-    # For now, use placeholder
+    desired_count = max(1, state.query_count or 3)
 
-    prompt = f"""Based on the following research question, generate 3-5 diverse search queries
-that would help gather comprehensive information.
-
-Research Question: {state.user_prompt}
-
-Language: {state.language}
-
-Generate queries in {state.language}. Return only the queries, one per line."""
+    system_prompt = (
+        "You are a research assistant that proposes diverse, high-quality search "
+        "queries to investigate a topic."
+    )
+    user_prompt = (
+        "Research question:\n"
+        f"{state.user_prompt}\n\n"
+        f"Language: {state.language}\n"
+        f"Provide {desired_count} distinct web search queries. "
+        "Return them as a simple list, one per line. "
+        "Avoid explanations or markdown."
+    )
 
     try:
-        # TODO: Implement actual LLM call
-        # Example:
-        # client = OllamaClient(config)
-        # response = client.chat([{"role": "user", "content": prompt}])
-        # queries = response.strip().split('\n')
+        response = state.call_ollama(system_prompt, user_prompt)
+        parsed = _parse_queries(response, desired_count)
 
-        # For now, create placeholder queries
-        queries = [
-            f"Query 1 for: {state.user_prompt}",
-            f"Query 2 for: {state.user_prompt}",
-            f"Query 3 for: {state.user_prompt}",
-        ]
+        if not parsed:
+            raise ValueError("LLM response did not contain any queries")
 
-        state.queries = queries
-        logger.info(f"Generated {len(queries)} queries")
+        state.queries = parsed
+        logger.info("Generated %s queries via Ollama", len(parsed))
 
-    except Exception as e:
-        logger.error(f"Query generation failed: {e}")
-        state.error_log.append(f"Query generation error: {str(e)}")
+    except Exception as exc:  # pragma: no cover - exercised via tests for error handling
+        logger.error("Query generation failed: %s", exc, exc_info=True)
+        state.error_log.append(f"Query generation error: {exc}")
+        if not state.queries:
+            # Fallback to at least one query using the original prompt
+            state.queries = [state.user_prompt]
 
     return state
+
+
+def _parse_queries(raw_text: str, desired_count: int) -> List[str]:
+    """Normalize LLM output into a clean list of queries."""
+    queries: List[str] = []
+
+    for line in raw_text.splitlines():
+        cleaned = line.strip()
+        if not cleaned:
+            continue
+        # Remove numbering such as "1. " or "- "
+        cleaned = re.sub(r"^\s*[\-\*\d\.\)\:]+\s*", "", cleaned).strip()
+        if cleaned:
+            queries.append(cleaned)
+
+    return queries[:desired_count]

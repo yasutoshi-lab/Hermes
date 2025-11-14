@@ -83,6 +83,10 @@ class HistoryService:
             self.logger.warning(f"History not found: {task_id}")
             return False
 
+        if meta.status != "success" or not meta.report_file:
+            self.logger.warning(f"History {task_id} has no successful report to export (status={meta.status})")
+            return False
+
         self.repository.export_report(task_id, dest_path)
         self.logger.info(f"Exported report {task_id} to {dest_path}")
         return True

@@ -4,7 +4,7 @@ This module defines the complete workflow graph for the Hermes research agent,
 orchestrating all nodes from prompt normalization through final report generation.
 """
 
-from langgraph.graph import Graph, END
+from langgraph.graph import StateGraph, START, END
 from hermes_cli.agents.state import HermesState
 from hermes_cli.agents.nodes import (
     prompt_normalizer,
@@ -39,7 +39,7 @@ def should_continue_validation(state: HermesState) -> str:
         return "validator"
 
 
-def create_hermes_workflow() -> Graph:
+def create_hermes_workflow():
     """Create and configure the Hermes workflow graph.
 
     Builds the complete LangGraph workflow with all nodes and edges,
@@ -51,13 +51,13 @@ def create_hermes_workflow() -> Graph:
     Workflow structure:
         prompt_normalizer → query_generator → web_researcher →
         container_processor → draft_aggregator → validation_controller ──┐
-                                                 ├─ continue → validator ──┘ (loop)
+                                                 ├─ continue → validator → web_researcher → ... (loop)
                                                  └─ complete → final_reporter → END
     """
     logger.info("Creating Hermes workflow graph")
 
     # Create graph
-    workflow = Graph()
+    workflow = StateGraph(HermesState)
 
     # Add nodes
     workflow.add_node("prompt_normalizer", prompt_normalizer)
@@ -70,7 +70,7 @@ def create_hermes_workflow() -> Graph:
     workflow.add_node("final_reporter", final_reporter)
 
     # Define edges (workflow sequence)
-    workflow.set_entry_point("prompt_normalizer")
+    workflow.add_edge(START, "prompt_normalizer")
 
     workflow.add_edge("prompt_normalizer", "query_generator")
     workflow.add_edge("query_generator", "web_researcher")
@@ -89,7 +89,7 @@ def create_hermes_workflow() -> Graph:
     )
 
     # Validation loop back to aggregator
-    workflow.add_edge("validator", "draft_aggregator")
+    workflow.add_edge("validator", "web_researcher")
 
     # End after final report
     workflow.add_edge("final_reporter", END)

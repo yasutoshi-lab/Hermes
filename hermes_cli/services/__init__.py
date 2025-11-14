@@ -15,6 +15,7 @@ from .run_service import RunService
 from .history_service import HistoryService
 from .log_service import LogService
 from .debug_service import DebugService, LogLevel
+from .queue_service import QueueService, QueueResult
 
 __all__ = [
     "ConfigService",
@@ -24,4 +25,6 @@ __all__ = [
     "LogService",
     "DebugService",
     "LogLevel",
+    "QueueService",
+    "QueueResult",
 ]

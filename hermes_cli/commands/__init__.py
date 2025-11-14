@@ -16,6 +16,7 @@ from .run_cmd import run_command
 from .log_cmd import log_command
 from .history_cmd import history_command
 from .debug_cmd import debug_command
+from .queue_cmd import queue_command
 
 __all__ = [
     "init_command",
@@ -24,4 +25,5 @@ __all__ = [
     "log_command",
     "history_command",
     "debug_command",
+    "queue_command",
 ]

@@ -9,6 +9,8 @@ from rich.console import Console
 from typing import Optional
 import logging
 
+from hermes_cli.services import TaskService
+
 console = Console()
 logger = logging.getLogger(__name__)
 
@@ -36,21 +38,35 @@ def log_command(
             raise typer.Exit(code=1)
 
         log_service = LogService()
+        resolved_task_id = task_id
 
-        if task_id:
-            console.print(f"[yellow]Note:[/yellow] Filtering by task ID not yet implemented")
-            console.print(f"Showing all recent logs")
+        if not resolved_task_id:
+            task_service = TaskService()
+            latest_running = task_service.get_latest_running_task()
+            if latest_running:
+                resolved_task_id = latest_running.id
+                console.print(f"[cyan]Defaulting to latest running task {resolved_task_id}[/cyan]")
+
+        needle = f"task_id={resolved_task_id}" if resolved_task_id else None
 
         if follow:
             console.print("[cyan]Following log (Ctrl+C to exit)...[/cyan]\n")
             try:
                 for line in log_service.stream():
+                    if needle and needle not in line:
+                        continue
                     console.print(line, end="")
             except KeyboardInterrupt:
                 console.print("\n[yellow]Stopped[/yellow]")
         else:
             logs = log_service.tail(lines=lines)
-            for line in logs:
+            filtered_logs = [
+                line for line in logs
+                if not needle or needle in line
+            ]
+            if needle and not filtered_logs:
+                console.print(f"[yellow]No log lines found for task {resolved_task_id}[/yellow]\n")
+            for line in filtered_logs or logs:
                 console.print(line, end="")
 
     except Exception as e:

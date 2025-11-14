@@ -23,25 +23,54 @@ def web_researcher(state: HermesState) -> HermesState:
     Returns:
         Updated state with search results
     """
-    logger.info(f"Starting web research for {len(state.queries)} queries")
+    queries_to_run = state.follow_up_queries or state.queries
+    if not queries_to_run:
+        logger.warning("No queries available for web research")
+        state.error_log.append("Web research skipped: no queries available")
+        return state
+
+    loop_label = f"loop {state.loop_count}" if state.loop_count else "initial pass"
+    logger.info(
+        "Starting web research for %s queries (%s)",
+        len(queries_to_run),
+        loop_label,
+    )
 
     try:
         with BrowserUseClient(max_sources=state.max_sources) as browser:
-            for idx, query in enumerate(state.queries):
-                logger.info(f"Researching query {idx + 1}/{len(state.queries)}: {query}")
+            for idx, query in enumerate(queries_to_run):
+                logger.info(
+                    "Researching query %s/%s (%s): %s",
+                    idx + 1,
+                    len(queries_to_run),
+                    loop_label,
+                    query,
+                )
 
                 try:
                     results = browser.search(query, max_sources=state.max_sources)
-                    state.query_results[query] = [
+                    formatted_results = [
                         {
                             "url": r.url,
                             "title": r.title,
+                            "snippet": r.snippet,
                             "content": r.content,
                             "timestamp": r.timestamp,
+                            "loop": state.loop_count,
                         }
                         for r in results
                     ]
-                    logger.info(f"Found {len(results)} sources for query: {query}")
+
+                    existing = state.query_results.get(query, [])
+                    state.query_results[query] = existing + formatted_results
+                    state.executed_queries.append(query)
+                    logger.info(
+                        "Collected %s sources for query '%s'",
+                        len(results),
+                        query,
+                    )
+                    if not results:
+                        logger.warning("No sources returned for query '%s'", query)
 
                 except Exception as e:
                     logger.error(f"Failed to research query '{query}': {e}")
@@ -52,5 +81,7 @@ def web_researcher(state: HermesState) -> HermesState:
         logger.error(f"Browser initialization failed: {e}")
         state.error_log.append(f"Browser error: {str(e)}")
 
+    # Follow-up queries have been consumed
+    state.follow_up_queries = []
     logger.info("Web research complete")
     return state

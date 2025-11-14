@@ -34,8 +34,10 @@ def final_reporter(state: HermesState) -> HermesState:
 query: {state.user_prompt}
 language: {state.language}
 queries_generated: {len(state.queries)}
+queries_executed: {len(state.executed_queries) or len(state.queries)}
 sources_collected: {sum(len(r) for r in state.query_results.values())}
 validation_loops: {state.loop_count}
+quality_score: {state.quality_score:.2f}
 ---
 
 """

@@ -1,0 +1,24 @@
+version: '1.0'
+agent_type: claude
+agents:
+  master:
+    enabled: true
+    command: claude --dangerously-skip-permissions
+    args: []
+  workers:
+    count: 3
+    command: claude --dangerously-skip-permissions
+    args: []
+monitoring:
+  health_check_interval: 30
+  retry_attempts: 3
+  retry_delay: 5
+communication:
+  format: markdown
+  encoding: utf-8
+logging:
+  level: INFO
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+tmux:
+  session_name: hephaestus
+  layout: tiled

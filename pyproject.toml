@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=64.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -27,7 +27,7 @@ dependencies = [
     "httpx",
     "langgraph",
     "pydantic",
-    "browser-use",
+    "duckduckgo-search>=6.2.0",
     "dagger-io",
     "pyyaml",
     "rich",
@@ -44,6 +44,10 @@ dev = [
     "black",
     "ruff",
     "mypy",
+]
+browser = [
+    # Install browser-use manually from source until a PyPI release is available.
+    "browser-use",
 ]
 
 [tool.setuptools.packages.find]

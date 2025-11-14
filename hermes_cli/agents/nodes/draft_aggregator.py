@@ -4,56 +4,48 @@ This node aggregates processed research notes into a draft report using LLM,
 creating a comprehensive initial report.
 """
 
-from hermes_cli.agents.state import HermesState
-from hermes_cli.tools import OllamaClient
 import logging
+
+from hermes_cli.agents.state import HermesState
 
 logger = logging.getLogger(__name__)
 
 
 def draft_aggregator(state: HermesState) -> HermesState:
-    """Aggregate processed notes into draft report using LLM.
-
-    Combines all processed research notes and generates a comprehensive
-    draft report answering the original question.
-
-    Args:
-        state: Current workflow state
-
-    Returns:
-        Updated state with draft report
-    """
+    """Aggregate processed notes into draft report using LLM."""
     logger.info("Aggregating draft report")
 
-    # Combine all processed notes
+    if not state.processed_notes:
+        logger.warning("No processed notes available; draft quality may be degraded")
+
     all_notes = "\n\n---\n\n".join(
         f"## Query: {query}\n\n{notes}"
         for query, notes in state.processed_notes.items()
+    ).strip()
+
+    system_prompt = (
+        "You are an expert research analyst. Create a concise, well-structured "
+        "markdown report citing the provided notes."
+    )
+    user_prompt = (
+        f"Original question:\n{state.user_prompt}\n\n"
+        f"Language: {state.language}\n\n"
+        "Research notes:\n"
+        f"{all_notes or 'No structured notes were provided; summarize based on the question.'}\n\n"
+        "Write a markdown report with:\n"
+        "- Executive summary\n"
+        "- Key findings\n"
+        "- Supporting details referencing the queries\n"
+        "- Recommended next steps\n"
     )
 
-    prompt = f"""Based on the following research notes, create a comprehensive report
-answering the original question.
-
-Original Question: {state.user_prompt}
-
-Research Notes:
-{all_notes}
-
-Create a well-structured markdown report in {state.language}."""
-
     try:
-        # TODO: Implement actual LLM call
-        # Example:
-        # client = OllamaClient(config)
-        # response = client.chat([{"role": "user", "content": prompt}])
-        # state.draft_report = response
+        response = state.call_ollama(system_prompt, user_prompt)
+        state.draft_report = response.strip()
+        logger.info("Draft report created using Ollama")
 
-        # For now, create placeholder
-        state.draft_report = f"# Draft Report\n\n{all_notes}"
-        logger.info("Draft report created")
-
-    except Exception as e:
-        logger.error(f"Draft aggregation failed: {e}")
-        state.error_log.append(f"Draft error: {str(e)}")
+    except Exception as exc:  # pragma: no cover - covered in integration
+        logger.error("Draft aggregation failed: %s", exc, exc_info=True)
+        state.error_log.append(f"Draft aggregation error: {exc}")
 
     return state

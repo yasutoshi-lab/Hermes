@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 def run_command(
     prompt: Optional[str] = typer.Option(None, "--prompt", help="Research prompt"),
+    task_id: Optional[str] = typer.Option(None, "--task-id", help="Execute an existing scheduled task"),
     export: Optional[Path] = typer.Option(None, "--export", help="Export report to path"),
     api: Optional[str] = typer.Option(None, "--api", help="Ollama API URL"),
     model: Optional[str] = typer.Option(None, "--model", help="Model name"),
@@ -38,6 +39,7 @@ def run_command(
         hermes run --prompt "Explain quantum computing"
         hermes run --prompt "AI trends" --language en --max-validation 5
         hermes run --export ./report.md  # Export last result
+        hermes run --task-id 2025-0001  # Execute scheduled task
         hermes run --clear  # Reset configuration
     """
     try:
@@ -71,8 +73,8 @@ def run_command(
                 raise typer.Exit(code=1)
             return
 
-        if not prompt:
-            console.print("[red]Error:[/red] Please provide --prompt")
+        if not prompt and not task_id:
+            console.print("[red]Error:[/red] Please provide --prompt or --task-id")
             raise typer.Exit(code=2)
 
         # Build options dict
@@ -81,7 +83,7 @@ def run_command(
             options['api'] = api
         if model:
             options['model'] = model
-        if retry:
+        if retry is not None:
             options['retry'] = retry
         if language:
             options['language'] = language
@@ -107,14 +109,27 @@ def run_command(
 
         run_service = RunService()
 
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Executing research task...", total=None)
+        # Scheduled task execution path
+        if task_id:
+            if options:
+                console.print("[red]Error:[/red] Cannot override options when using --task-id")
+                raise typer.Exit(code=2)
 
-            history_meta = run_service.run_prompt(prompt, options)
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                progress.add_task(f"Executing scheduled task {task_id}...", total=None)
+                history_meta = run_service.run_task(task_id)
+        else:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                progress.add_task("Executing research task...", total=None)
+                history_meta = run_service.run_prompt(prompt, options)
 
         # Display results
         console.print(Panel.fit(
