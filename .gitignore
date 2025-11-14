@@ -60,4 +60,4 @@ logs/
 Thumbs.db
 
 # Hephaestus
-.hephaestus-work/
+#.hephaestus-work/
