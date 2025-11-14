@@ -117,8 +117,9 @@ class RunService:
             workflow = create_hermes_workflow()
             result_state = workflow.invoke(state)
 
-            # Extract final report
-            if not result_state.validated_report:
+            # Extract final report (LangGraph returns dict)
+            validated_report = result_state.get("validated_report", "")
+            if not validated_report:
                 raise RuntimeError("Workflow did not produce a report")
 
             # Save to history
@@ -131,14 +132,14 @@ class RunService:
                 created_at=created_at,
                 finished_at=finished_at,
                 model=config.ollama.model,
-                language=state.language,
-                validation_loops=state.loop_count,
-                source_count=sum(len(r) for r in result_state.query_results.values()),
+                language=result_state.get("language", state.language),
+                validation_loops=result_state.get("loop_count", 0),
+                source_count=sum(len(r) for r in result_state.get("query_results", {}).values()),
                 report_file=f"report-{run_id}.md",
                 status="success",
             )
 
-            self.history_repository.save_report(run_id, result_state.validated_report)
+            self.history_repository.save_report(run_id, validated_report)
             self.history_repository.save_meta(history_meta)
 
             self.log_repository.write_log(

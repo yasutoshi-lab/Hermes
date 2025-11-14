@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 import logging
 
 console = Console()
@@ -16,12 +16,10 @@ logger = logging.getLogger(__name__)
 
 
 def history_command(
-    export: Optional[Tuple[str, Path]] = typer.Option(
+    export: Optional[str] = typer.Option(
         None,
         "--export",
-        help="Export report for TASK_ID to PATH",
-        metavar=("TASK_ID", "PATH"),
-        nargs=2,
+        help="Export report: TASK_ID:PATH (e.g., 2025-0001:./report.md)",
     ),
     delete: Optional[str] = typer.Option(None, "--delete", help="Delete history by ID"),
     deleate: Optional[str] = typer.Option(None, "--deleate", help="Delete history by ID (typo alias)"),
@@ -58,7 +56,12 @@ def history_command(
                 raise typer.Exit(code=1)
 
         elif export:
-            task_id, dest_path = export
+            # Parse TASK_ID:PATH format
+            if ":" not in export:
+                console.print("[red]✗[/red] Export format must be TASK_ID:PATH (e.g., 2025-0001:./report.md)")
+                raise typer.Exit(code=1)
+            task_id, dest_path_str = export.split(":", 1)
+            dest_path = Path(dest_path_str)
             meta = history_service.get_history(task_id)
             if not meta:
                 console.print(f"[red]✗[/red] History {task_id} not found")
