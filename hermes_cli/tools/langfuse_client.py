@@ -17,6 +17,7 @@ class LangfuseClient:
     ):
         self.enabled = enabled
         self.client: Optional[Langfuse] = None
+        self.current_trace = None
 
         if enabled and public_key and secret_key and host:
             try:
@@ -39,99 +40,76 @@ class LangfuseClient:
             logger.info("Langfuse tracing disabled", extra={"category": "LANGFUSE"})
 
     def create_trace(
-        self, name: str, user_id: Optional[str] = None, metadata: Optional[Dict] = None
-    ) -> Optional[Any]:
-        """トレース作成"""
+        self, name: str, metadata: Optional[Dict] = None, input_data: Optional[Any] = None
+    ):
+        """トレースを作成"""
         if not self.enabled or not self.client:
             return None
 
         try:
-            trace = self.client.trace(
+            self.current_trace = self.client.trace(
                 name=name,
-                user_id=user_id,
-                metadata=metadata or {},
+                metadata=metadata,
+                input=input_data,
             )
-            return trace
+            logger.debug(f"Trace created: {name}", extra={"category": "LANGFUSE"})
+            return self.current_trace
         except Exception as e:
             logger.error(
                 f"Failed to create trace: {e}", extra={"category": "LANGFUSE"}
             )
             return None
 
-    def create_span(
-        self,
-        trace_id: str,
-        name: str,
-        input_data: Optional[Dict] = None,
-        metadata: Optional[Dict] = None,
-    ) -> Optional[Any]:
-        """スパン作成"""
-        if not self.enabled or not self.client:
-            return None
-
-        try:
-            span = self.client.span(
-                trace_id=trace_id,
-                name=name,
-                input=input_data,
-                metadata=metadata or {},
-            )
-            return span
-        except Exception as e:
-            logger.error(
-                f"Failed to create span: {e}", extra={"category": "LANGFUSE"}
-            )
-            return None
-
-    def update_span(
-        self,
-        span_id: str,
-        output_data: Optional[Dict] = None,
-        metadata: Optional[Dict] = None,
-        level: str = "DEFAULT",
-    ) -> None:
-        """スパン更新"""
-        if not self.enabled or not self.client:
+    def update_trace(self, output_data: Optional[Any] = None, metadata: Optional[Dict] = None):
+        """トレースを更新"""
+        if not self.enabled or not self.current_trace:
             return
 
         try:
-            self.client.span(
-                id=span_id,
+            self.current_trace.update(
                 output=output_data,
                 metadata=metadata,
-                level=level,
             )
         except Exception as e:
             logger.error(
-                f"Failed to update span: {e}", extra={"category": "LANGFUSE"}
+                f"Failed to update trace: {e}", extra={"category": "LANGFUSE"}
             )
 
-    def log_generation(
+    def create_generation(
         self,
-        trace_id: str,
         name: str,
         model: str,
-        input_data: Any,
-        output_data: Any,
+        input_data: Optional[Dict] = None,
+        output_data: Optional[Dict] = None,
         metadata: Optional[Dict] = None,
-    ) -> None:
-        """LLM生成ログ"""
+    ):
+        """LLM生成を記録"""
         if not self.enabled or not self.client:
-            return
+            return None
 
         try:
-            self.client.generation(
-                trace_id=trace_id,
-                name=name,
-                model=model,
-                input=input_data,
-                output=output_data,
-                metadata=metadata or {},
-            )
+            if self.current_trace:
+                return self.current_trace.generation(
+                    name=name,
+                    model=model,
+                    input=input_data,
+                    output=output_data,
+                    metadata=metadata,
+                )
+            else:
+                return self.client.generation(
+                    name=name,
+                    model=model,
+                    input=input_data,
+                    output=output_data,
+                    metadata=metadata,
+                )
         except Exception as e:
             logger.error(
-                f"Failed to log generation: {e}", extra={"category": "LANGFUSE"}
+                f"Failed to create generation: {e}",
+                extra={"category": "LANGFUSE"},
             )
+            return None
 
     def flush(self) -> None:
         """バッファをフラッシュ"""

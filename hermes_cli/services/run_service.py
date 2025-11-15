@@ -71,18 +71,6 @@ class RunService:
 
         logger.info(f"Starting task: {task_id}", extra={"category": "RUN"})
 
-        # Langfuseトレース作成
-        trace = None
-        if self.langfuse.enabled:
-            trace = self.langfuse.create_trace(
-                name=f"hermes-task-{task_id}",
-                metadata={
-                    "task_id": task_id,
-                    "prompt": prompt[:100],  # 最初の100文字
-                    "model": self.config.ollama.model,
-                },
-            )
-
         # タスクステータス更新
         if self.task_service.get_task(task_id):
             self.task_service.update_task_status(task_id, "running")
@@ -99,8 +87,19 @@ class RunService:
                     "validation": self.config.validation.model_dump(),
                 },
                 "start_time": start_time.isoformat(),
-                "langfuse_trace_id": trace.id if trace else None,
             }
+
+            # Langfuseトレース作成
+            if self.langfuse.enabled:
+                self.langfuse.create_trace(
+                    name=f"hermes-task-{task_id}",
+                    metadata={
+                        "task_id": task_id,
+                        "prompt": prompt[:100],
+                        "model": self.config.ollama.model,
+                    },
+                    input_data={"prompt": prompt},
+                )
 
             # 検証ループ対応のため再帰制限を増やす
             result_state = await workflow.ainvoke(
@@ -149,8 +148,20 @@ class RunService:
                 extra={"category": "RUN", "duration": metadata.duration},
             )
 
-            # Langfuseにトレース完了を記録
-            if trace:
+            # Langfuseトレース更新とフラッシュ
+            if self.langfuse.enabled:
+                self.langfuse.update_trace(
+                    output_data={
+                        "status": "success",
+                        "duration": metadata.duration,
+                        "loops": metadata.loops,
+                        "sources": metadata.sources,
+                    },
+                    metadata={
+                        "finish_time": finish_time.isoformat(),
+                        "model": self.config.ollama.model,
+                    },
+                )
                 self.langfuse.flush()
 
             return {
@@ -184,5 +195,18 @@ class RunService:
             logger.error(
                 f"Task failed: {task_id} - {e}", extra={"category": "RUN"}
             )
+
+            # Langfuseエラートレース更新
+            if self.langfuse.enabled:
+                self.langfuse.update_trace(
+                    output_data={
+                        "status": "failed",
+                        "error": str(e),
+                    },
+                    metadata={
+                        "finish_time": finish_time.isoformat(),
+                    },
+                )
+                self.langfuse.flush()
 
             raise

@@ -23,7 +23,7 @@ dependencies = [
     "redis>=5.0.0",
     "loguru>=0.7.2",
     "rich>=13.7.0",
-    "langfuse>=3.10.0",
+    "langfuse>=2.0.0,<3.0.0",
 ]
 
 [project.optional-dependencies]
