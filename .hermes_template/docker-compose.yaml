@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # Redis (キャッシュ)
+  redis:
+    image: docker.io/valkey/valkey:8-alpine
+    container_name: hermes-redis
+    command: valkey-server --save 30 1 --loglevel warning
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - hermes-net
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # SearxNG (メタ検索)
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: hermes-searxng
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+      - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-CHANGE_ME_TO_RANDOM_STRING}
+      - UWSGI_WORKERS=4
+      - UWSGI_THREADS=4
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    restart: unless-stopped
+    networks:
+      - hermes-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  hermes-net:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local

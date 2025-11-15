@@ -1,0 +1,51 @@
+# Hermes 設定ファイル
+
+# 作業ディレクトリ
+work_dir: ~/.hermes
+
+# 出力言語 (ja/en)
+language: ja
+
+# Ollama 設定
+ollama:
+  api_url: http://localhost:11434/api/chat
+  model: gpt-oss:20b
+  timeout: 120
+  retry: 3
+  temperature: 0.7
+  max_tokens: 4096
+
+# 検索設定
+search:
+  searxng_base_url: http://localhost:8080
+  redis_url: redis://localhost:6379/0
+  min_search: 3
+  max_search: 8
+  query_count: 3
+  cache_ttl: 3600
+
+# 検証設定
+validation:
+  min_validation: 1
+  max_validation: 3
+
+# ブラウザ設定
+browser:
+  headless: true
+  stealth_mode: true
+  timeout: 30
+  user_agent: null
+
+# ロギング設定
+logging:
+  level: INFO
+  format: "{time:YYYY-MM-DDTHH:mm:ss.SSSSSSZ} [{level}] [{extra[category]}] {message}"
+  rotation: "1 day"
+  retention: "30 days"
+
+# Langfuse設定 (オプション)
+langfuse:
+  enabled: false
+  base_url: https://cloud.langfuse.com
+  public_key: null
+  secret_key: null

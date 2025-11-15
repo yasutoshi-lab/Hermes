@@ -1,0 +1,44 @@
+general:
+  debug: false
+  instance_name: "Hermes Search"
+  contact_url: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "ja"
+
+server:
+  secret_key: "CHANGE_ME"
+  limiter: true
+  image_proxy: true
+
+ui:
+  static_use_hash: true
+  default_theme: simple
+  theme_args:
+    simple_style: dark
+
+redis:
+  url: redis://redis:6379/0
+
+engines:
+  - name: google
+    engine: google
+    shortcut: go
+    weight: 1.0
+
+  - name: bing
+    engine: bing
+    shortcut: bi
+    weight: 0.8
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    weight: 0.9
+
+  - name: qwant
+    engine: qwant
+    shortcut: qw
+    weight: 0.7
