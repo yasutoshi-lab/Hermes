@@ -26,6 +26,17 @@ def should_continue_validation(state: WorkflowState) -> str:
         logger.info("Max validation reached, finalizing", extra={"category": "RUN"})
         return "finalize"
 
+    # 検索が連続で失敗している場合は最小回数到達で終了
+    search_responses = state.get("search_responses", [])
+    has_results = any(len(r.get("results", [])) > 0 for r in search_responses)
+
+    if not has_results and state["validation_loop"] >= min_val:
+        logger.info(
+            "Search unavailable and min validation reached, finalizing",
+            extra={"category": "RUN"},
+        )
+        return "finalize"
+
     # 最小回数未満は継続
     if state["validation_loop"] < min_val:
         if state.get("additional_queries"):

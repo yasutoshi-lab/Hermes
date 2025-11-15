@@ -45,15 +45,6 @@ class ValidationConfig(BaseModel):
         return v
 
 
-class BrowserConfig(BaseModel):
-    """ブラウザ設定"""
-
-    headless: bool = Field(default=True, description="ヘッドレスモード")
-    stealth_mode: bool = Field(default=True, description="ステルスモード")
-    timeout: int = Field(default=30, ge=5, le=180)
-    user_agent: Optional[str] = None
-
-
 class LoggingConfig(BaseModel):
     """ロギング設定"""
 
@@ -81,7 +72,6 @@ class HermesConfig(BaseModel):
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     validation: ValidationConfig = Field(default_factory=ValidationConfig)
-    browser: BrowserConfig = Field(default_factory=BrowserConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     langfuse: LangfuseConfig = Field(default_factory=LangfuseConfig)
 
