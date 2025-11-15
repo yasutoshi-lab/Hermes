@@ -1,10 +1,10 @@
 # Hermes
 
+[日本語ドキュメント](README.md)
+
 > Advanced Information Gathering Agent based on Local LLM
 
 **Hermes** is a locally executable CLI information gathering agent for researchers and engineers. It automates everything from web searches and content analysis to report generation, creating high-quality research reports.
-
-[日本語ドキュメント](README.md)
 
 ## Overview
 
@@ -30,6 +30,19 @@ Main Use Cases:
 - **Intelligent Caching**: Caching of search results with Redis
 - **Quality Assurance**: High-precision output through multiple validation loops
 - **Extensibility**: Easy to add new features due to modular design
+
+## Documentation
+
+- **[Setup Guide](./doc/setup/setup_en.md)**: Detailed instructions for installation and environment setup.
+- **Command Reference**:
+    - [`hermes init`](./doc/command/init_cmd_en.md)
+    - [`hermes task`](./doc/command/task_cmd_en.md)
+    - [`hermes run`](./doc/command/run_cmd_en.md)
+    - [`hermes log`](./doc/command/log_cmd_en.md)
+    - [`hermes history`](./doc/command/history_cmd_en.md)
+- **[Configuration File (`config.yaml`)](./doc/config/config_en.md)**: Detailed configuration for `config.yaml`.
+- **[Testing Strategy](./doc/test/tests_en.md)**: The project's policy on testing.
+- **[Troubleshooting](./doc/troubleshooting/troubleshooting_en.md)**: Common problems and their solutions.
 
 ## Architecture
 

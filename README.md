@@ -1,10 +1,10 @@
 # Hermes
 
+[English Documentation](README_EN.md)
+
 > ローカルLLMベースの高度な情報収集エージェント
 
 **Hermes** は、研究者や技術者向けのローカル実行可能な CLI 情報収集エージェントです。Web検索、コンテンツ分析、レポート生成までを自動化し、高品質なリサーチレポートを作成します。
-
-[English Documentation](README_EN.md)
 
 ## 概要
 
@@ -30,6 +30,19 @@ Hermesは、ローカルLLM（Large Language Model）を活用した次世代の
 - **インテリジェントキャッシング**: Redis による検索結果のキャッシング
 - **品質保証**: 複数回の検証ループによる高精度な出力
 - **拡張性**: モジュラー設計による機能追加の容易さ
+
+## ドキュメント
+
+- **[セットアップガイド](./doc/setup/setup_ja.md)**: インストールと環境構築の詳細手順
+- **コマンドリファレンス**:
+    - [`hermes init`](./doc/command/init_cmd_ja.md)
+    - [`hermes task`](./doc/command/task_cmd_ja.md)
+    - [`hermes run`](./doc/command/run_cmd_ja.md)
+    - [`hermes log`](./doc/command/log_cmd_ja.md)
+    - [`hermes history`](./doc/command/history_cmd_ja.md)
+- **[設定ファイル (`config.yaml`)](./doc/config/config_ja.md)**: `config.yaml` の詳細な設定方法
+- **[テスト戦略](./doc/test/tests_ja.md)**: プロジェクトのテストに関する方針
+- **[トラブルシューティング](./doc/troubleshooting/troubleshooting_ja.md)**: よくある問題とその解決策
 
 ## アーキテクチャ
 
