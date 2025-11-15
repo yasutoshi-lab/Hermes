@@ -61,3 +61,15 @@ Thumbs.db
 
 # Hephaestus
 #.hephaestus-work/
+
+# Hermes
+.hermes/
+*.meta.yaml
+.uv/
+uv.lock
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
