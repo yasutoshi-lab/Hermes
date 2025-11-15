@@ -6,10 +6,8 @@ from hermes_cli.agents.state import WorkflowState
 
 def should_continue_validation(state: WorkflowState) -> str:
     """検証ループ継続判定"""
-    if "validation_loop" not in state:
-        state["validation_loop"] = 0
-
-    state["validation_loop"] += 1
+    # ループカウンタは validate_report ノード内で更新される
+    loop_count = state.get("validation_loop", 0)
 
     config = state["config"]
     validation_config = config.get("validation", {})
@@ -17,12 +15,12 @@ def should_continue_validation(state: WorkflowState) -> str:
     max_val = validation_config.get("max_validation", 3)
 
     logger.info(
-        f"Validation loop: {state['validation_loop']}/{max_val}",
+        f"Validation loop: {loop_count}/{max_val}",
         extra={"category": "RUN"},
     )
 
     # 最大回数到達
-    if state["validation_loop"] >= max_val:
+    if loop_count >= max_val:
         logger.info("Max validation reached, finalizing", extra={"category": "RUN"})
         return "finalize"
 
@@ -30,7 +28,7 @@ def should_continue_validation(state: WorkflowState) -> str:
     search_responses = state.get("search_responses", [])
     has_results = any(len(r.get("results", [])) > 0 for r in search_responses)
 
-    if not has_results and state["validation_loop"] >= min_val:
+    if not has_results and loop_count >= min_val:
         logger.info(
             "Search unavailable and min validation reached, finalizing",
             extra={"category": "RUN"},
@@ -38,7 +36,7 @@ def should_continue_validation(state: WorkflowState) -> str:
         return "finalize"
 
     # 最小回数未満は継続
-    if state["validation_loop"] < min_val:
+    if loop_count < min_val:
         if state.get("additional_queries"):
             logger.info(
                 "Min validation not reached, continuing",

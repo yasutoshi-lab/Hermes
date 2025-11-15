@@ -48,5 +48,4 @@ def create_workflow() -> StateGraph:
 
     workflow.add_edge("finalize", END)
 
-    # 検証ループ対応のため再帰制限を増やす
-    return workflow.compile({"recursion_limit": 50})
+    return workflow.compile()

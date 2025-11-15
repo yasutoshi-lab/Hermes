@@ -11,6 +11,11 @@ async def validate_report(state: WorkflowState) -> WorkflowState:
 
     state["current_node"] = "validate_report"
 
+    # 検証ループカウンタを更新（Edge関数ではなくNode内で更新）
+    if "validation_loop" not in state:
+        state["validation_loop"] = 0
+    state["validation_loop"] += 1
+
     try:
         config = state["config"]
         ollama_config = config.get("ollama", {})

@@ -80,7 +80,10 @@ class RunService:
                 "start_time": start_time.isoformat(),
             }
 
-            result_state = await workflow.ainvoke(initial_state)
+            # 検証ループ対応のため再帰制限を増やす
+            result_state = await workflow.ainvoke(
+                initial_state, {"recursion_limit": 50}
+            )
 
             # レポート作成
             final_report_data = result_state.get("final_report", {})
