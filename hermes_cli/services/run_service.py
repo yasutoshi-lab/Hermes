@@ -10,6 +10,7 @@ from hermes_cli.models.report import Report, ReportMetadata, ReportSection, Cita
 from hermes_cli.services.task_service import TaskService
 from hermes_cli.services.history_service import HistoryService
 from hermes_cli.agents.graph import create_workflow
+from hermes_cli.tools.langfuse_client import LangfuseClient
 
 
 class RunService:
@@ -19,6 +20,14 @@ class RunService:
         self.config = config
         self.task_service = TaskService(config.work_dir)
         self.history_service = HistoryService(config.work_dir)
+
+        # Langfuseクライアント初期化
+        self.langfuse = LangfuseClient(
+            enabled=config.langfuse.enabled,
+            host=config.langfuse.host,
+            public_key=config.langfuse.public_key,
+            secret_key=config.langfuse.secret_key,
+        )
 
     async def execute(
         self,
@@ -62,6 +71,18 @@ class RunService:
 
         logger.info(f"Starting task: {task_id}", extra={"category": "RUN"})
 
+        # Langfuseトレース作成
+        trace = None
+        if self.langfuse.enabled:
+            trace = self.langfuse.create_trace(
+                name=f"hermes-task-{task_id}",
+                metadata={
+                    "task_id": task_id,
+                    "prompt": prompt[:100],  # 最初の100文字
+                    "model": self.config.ollama.model,
+                },
+            )
+
         # タスクステータス更新
         if self.task_service.get_task(task_id):
             self.task_service.update_task_status(task_id, "running")
@@ -78,6 +99,7 @@ class RunService:
                     "validation": self.config.validation.model_dump(),
                 },
                 "start_time": start_time.isoformat(),
+                "langfuse_trace_id": trace.id if trace else None,
             }
 
             # 検証ループ対応のため再帰制限を増やす
@@ -126,6 +148,10 @@ class RunService:
                 f"Task completed: {task_id}",
                 extra={"category": "RUN", "duration": metadata.duration},
             )
+
+            # Langfuseにトレース完了を記録
+            if trace:
+                self.langfuse.flush()
 
             return {
                 "task_id": task_id,

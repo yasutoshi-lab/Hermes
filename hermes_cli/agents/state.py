@@ -34,3 +34,4 @@ class WorkflowState(TypedDict, total=False):
     start_time: str
     current_node: str
     errors: List[Dict[str, Any]]
+    langfuse_trace_id: Optional[str]

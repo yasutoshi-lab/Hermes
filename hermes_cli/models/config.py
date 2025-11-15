@@ -58,7 +58,7 @@ class LangfuseConfig(BaseModel):
     """Langfuse設定 (オプション)"""
 
     enabled: bool = False
-    base_url: Optional[str] = "https://cloud.langfuse.com"
+    host: Optional[str] = "http://127.0.0.1:3000"
     public_key: Optional[str] = None
     secret_key: Optional[str] = None
 

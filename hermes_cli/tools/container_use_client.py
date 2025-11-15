@@ -16,7 +16,13 @@ class SearxNGClient:
     def __init__(self, searxng_url: str, redis_url: str, cache_ttl: int = 3600):
         self.searxng_url = searxng_url.rstrip("/")
         self.cache_ttl = cache_ttl
-        self.http_client = httpx.AsyncClient(timeout=30)
+        # SearxNGのボット検知を回避するためのヘッダーを設定
+        headers = {
+            "X-Forwarded-For": "127.0.0.1",
+            "X-Real-IP": "127.0.0.1",
+            "User-Agent": "Hermes/1.0 (Research Agent)",
+        }
+        self.http_client = httpx.AsyncClient(timeout=30, headers=headers)
         self.redis_client = redis.from_url(redis_url, decode_responses=True)
 
     def _cache_key(self, query: str, category: str = "general") -> str:
