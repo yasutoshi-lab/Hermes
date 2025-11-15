@@ -1,141 +1,246 @@
 # Hermes CLI
 
-Hermes is a CLI-first research agent that orchestrates LangGraph workflows,
-Ollama-hosted LLMs, and (future) browser/container integrations to gather
-information, iterate through validation loops, and save reports locally.
+Hermesは、LangGraphワークフロー、Ollama でホストされたLLM、および（将来的な）ブラウザ/コンテナ統合を組み合わせて、情報収集、検証ループの反復、ローカルでのレポート保存を行う、CLI ファーストのリサーチエージェントです。
 
-## Features
+## 機能
 
-- 🤖 **LLM-driven workflow** – Typer CLI feeds prompts into a LangGraph graph
-  (`hermes_cli/agents/graph.py`) that normalizes input, generates queries, and
-  produces structured markdown reports.
-- 🔁 **Configurable validation loops** – `~/.hermes/config.yaml` controls the
-  minimum/maximum validation cycles enforced by `validation_controller`. Each
-  loop re-enters the draft stage until limits are met.
-- 🗂️ **File-based persistence** – Tasks, logs, and history are persisted as YAML
-  and Markdown under `~/.hermes/` via repositories in `hermes_cli/persistence/`.
-- 🛠️ **Service layer abstraction** – Commands defer to services (config, run,
-  task, history, log, debug) that can be reused in other entry points.
-- 📜 **Full audit trail** – `hermes history`, `hermes log`, and `hermes debug`
-  provide report exports, structured logs, and filtered debug streams.
-- ⚠️ **Clear limitations** – Browser-use and container-use clients are wired in
-  but still return placeholder data; external integration work is required
-  before Hermes can browse the web or execute isolated scripts.
+- 🤖 **LLM駆動のワークフロー** – Typer CLI がプロンプトを LangGraph グラフ
+  (`hermes_cli/agents/graph.py`) に送り込み、入力を正規化し、クエリを生成し、
+  構造化されたマークダウンレポートを作成します。
+- 🔁 **設定可能な検証ループ** – `~/.hermes/config.yaml` が `validation_controller` によって
+  実行される最小/最大検証サイクルを制御します。各ループは制限に達するまでドラフトステージに
+  再度入ります。
+- 🗂️ **ファイルベースの永続化** – タスク、ログ、履歴は `hermes_cli/persistence/` の
+  リポジトリを介して `~/.hermes/` 配下に YAML とマークダウンとして永続化されます。
+- 🛠️ **サービスレイヤーの抽象化** – コマンドはサービス（config、run、task、history、log、debug）
+  に処理を委譲し、他のエントリポイントでも再利用可能です。
+- 📜 **完全な監査証跡** – `hermes history`、`hermes log`、`hermes debug` が
+  レポートのエクスポート、構造化ログ、フィルタリングされたデバッグストリームを提供します。
+- 🌐 **Web リサーチ機能** – DuckDuckGo 統合により即座に Web 検索機能を提供。
+  高度な自動化のための browser-use アップグレードもオプションで利用可能です。
+- 🐳 **コンテナ分離** – dagger-io を介した Docker ベースの処理。コンテナが
+  利用できない場合は自動的にローカル処理にフォールバックします。
 
-## Prerequisites
+## 前提条件
 
-- Python 3.10+ (tested with CPython; use a virtual environment)
-- `uv` or `pip` for dependency management
-- [Ollama](https://ollama.ai/) with the `gpt-oss:20b` model pulled locally
-- Docker (or another OCI runtime) for future container-use integration
-- Optional: `watchdog` for live log monitoring (already listed in deps)
-- Start the Ollama server before running Hermes:
+- Python 3.10+ (CPython 3.10-3.12 でテスト済み。仮想環境の使用を推奨)
+- 依存関係管理のための `uv` または `pip`
+- `gpt-oss:20b` モデルがローカルにプルされた [Ollama](https://ollama.ai/)
   ```bash
+  # https://ollama.ai/download から Ollama をインストール
+  # 必要なモデルをプル
+  ollama pull gpt-oss:20b
+
+  # Ollama サーバーを起動（別のターミナルで実行し続ける）
   ollama serve
   ```
+- **Docker** (container-use 統合に必要)
+  - Docker 20.10+ を推奨
+  - 詳細な手順については[統合のセットアップ](#統合のセットアップ)セクションを参照
+- **オプション: browser-use** 高度な Web 自動化のため
+  - これがなくても DuckDuckGo フォールバックが機能します
+  - インストール方法は[統合のセットアップ](#統合のセットアップ)セクションを参照
 
-> ℹ️ Hermes currently stubs browser/container actions. Hermes now talks to a real
-> Ollama server for query generation, drafting, and validation, so keep
-> `ollama serve` running when using `hermes run`.
+> ℹ️ Hermes は LLM 操作のために `ollama serve` の実行が必要です。Web リサーチは
+> DuckDuckGo で箱から出してすぐに動作します。browser-use をインストールすると
+> 拡張機能が利用可能になります。container-use は Docker が利用可能な場合に分離処理を
+> 提供し、それ以外の場合はローカル処理にフォールバックします。
 
-## Installation
+## インストール
 
 ```bash
 git clone https://example.com/Hermes.git
 cd Hermes
 
-# Create & activate a virtual environment (adjust path/shell as needed)
+# 仮想環境を作成してアクティベート（パス/シェルは適宜調整）
 python -m venv .venv
 source .venv/bin/activate
 
-# Editable install via pip
+# pip を使用した編集可能インストール
 pip install -e .
 
-# or install with uv (faster resolver)
+# または uv を使用してインストール（より高速なリゾルバ）
 uv pip install -e .
 
-# Optional browser automation extra (requires browser-use installed from source)
-# pip install -e .[browser]
-# See the Browser Client section below for details.
+# 注意: DuckDuckGo Web 検索はすぐに動作します。
+# 高度なブラウザ自動化については、以下の統合のセットアップセクションを参照してください。
 ```
 
-To include developer tooling (pytest, ruff, mypy, black):
+開発者ツール（pytest、ruff、mypy、black）を含める場合:
 
 ```bash
 pip install -e .[dev]
-# or
+# または
 uv pip install -e '.[dev]'
 ```
 
-## Quick Start
+## 統合のセットアップ
 
-1. **Start the Ollama daemon**
+### Container-use (dagger-io)
+
+Hermes は分離されたテキスト正規化と処理のために container-use（dagger-io 経由）を使用します。`dagger-io` パッケージは自動的にインストールされますが、完全な機能を利用するには Docker が実行されている必要があります。
+
+**セットアップ手順:**
+
+1. **Docker のインストール**（まだインストールされていない場合）:
+   ```bash
+   # Ubuntu/Debian
+   sudo apt-get update
+   sudo apt-get install docker.io
+   sudo systemctl start docker
+   sudo systemctl enable docker
+
+   # macOS (Docker Desktop を使用)
+   # https://www.docker.com/products/docker-desktop からダウンロード
+
+   # インストールの確認
+   docker --version
+   ```
+
+2. **ユーザーを docker グループに追加**（Linux のみ、sudo を避けるため）:
+   ```bash
+   sudo usermod -aG docker $USER
+   # 変更を有効にするためログアウトして再度ログイン
+   ```
+
+3. **コンテナアクセスのテスト**:
+   ```bash
+   docker ps
+   # 実行中のコンテナを表示（実行中のものがない場合は空のリスト）
+   ```
+
+**フォールバック動作:**
+Docker が利用できない場合、Hermes は自動的にローカルのテキスト正規化にフォールバックし、警告をログに記録します。ワークフローはコンテナ分離なしで続行されます。
+
+### Browser-use
+
+Hermes は Web リサーチに 2 つのモードをサポートしています:
+
+1. **DuckDuckGo フォールバック（デフォルト）** - `duckduckgo-search` で箱から出してすぐに動作
+2. **browser-use（オプション）** - 高度なブラウザ自動化機能を提供
+
+**オプション A: DuckDuckGo フォールバックを使用（入門に推奨）**
+
+追加のセットアップは不要です。`duckduckgo-search` パッケージは自動的にインストールされ、信頼性の高い Web 検索機能を提供します。
+
+**オプション B: 高度な機能のために browser-use をインストール**
+
+現在、`browser-use` は PyPI でまだ利用できないため、ソースからインストールする必要があります。
+
+1. **browser-use をクローンしてインストール**:
+   ```bash
+   # 別のディレクトリで
+   cd /tmp
+   git clone https://github.com/browser-use/browser-use.git
+   cd browser-use
+   pip install -e .
+   ```
+
+2. **browser extra 付きで Hermes をインストール**:
+   ```bash
+   cd /path/to/Hermes
+   pip install -e .[browser]
+   ```
+
+3. **ブラウザの依存関係をインストール**:
+   ```bash
+   # Playwright ブラウザをインストール
+   playwright install chromium
+
+   # Linux では、追加のシステム依存関係が必要な場合があります
+   playwright install-deps chromium
+   ```
+
+4. **browser-use が検出されることを確認**:
+   ```bash
+   # テストクエリを実行 - ログで "browser-use detected" を確認
+   hermes run --prompt "test query" --max-validation 1
+   hermes log -n 10 | grep browser
+   ```
+
+**モード間の切り替え:**
+
+Hermes は `browser-use` がインストールされているかどうかを自動的に検出して使用します。browser-use が利用可能でも DuckDuckGo フォールバックを強制するには、アンインストールしてください:
+
+```bash
+pip uninstall browser-use
+```
+
+**トラブルシューティング:**
+
+- **DuckDuckGo のレート制限**: レート制限に関するエラーが表示される場合は、実行間に遅延を追加するか、より小さい `--max-sources` 値を使用してください。
+- **browser-use の初期化失敗**: `playwright --version` で Playwright のインストールを確認し、chromium がインストールされていることを確認してください。
+- **Robots.txt によるブロック**: 一部のサイトは自動アクセスをブロックします。Hermes は robots.txt を尊重し、それらの URL をスキップします。
+
+## クイックスタート
+
+1. **Ollama デーモンを起動**
    ```bash
    ollama serve
    ```
-   Leave this running in another terminal so Hermes can reach the API.
+   Hermes が API に到達できるよう、別のターミナルでこれを実行し続けてください。
 
-2. **Initialize workspace**
+2. **ワークスペースの初期化**
    ```bash
    hermes init
    ```
-   Creates `~/.hermes/` with `config.yaml`, `history/`, `log/`, and related
-   directories. Rerunning prints a reminder if everything already exists.
+   `config.yaml`、`history/`、`log/`、および関連ディレクトリを含む `~/.hermes/` を作成します。
+   すべてが既に存在する場合、再実行するとリマインダーが表示されます。
 
-3. **Run your first research task**
+3. **最初のリサーチタスクを実行**
    ```bash
-   hermes run --prompt "Explain quantum computing error correction methods"
+   hermes run --prompt "量子コンピューティングのエラー訂正手法を説明してください"
    ```
-   `RunService` loads config, builds LangGraph state, writes structured logs,
-   and saves `report-<ID>.md` plus metadata in `~/.hermes/history/`.
+   `RunService` が設定をロードし、LangGraph ステートを構築し、構造化ログを書き込み、
+   `~/.hermes/history/` に `report-<ID>.md` とメタデータを保存します。
 
-4. **Inspect the results**
+4. **結果を確認**
    ```bash
    hermes history --limit 5
-   hermes run --export ./latest-report.md    # exports most recent report
+   hermes run --export ./latest-report.md    # 最新のレポートをエクスポート
    hermes history --export 2025-0001 ./report.md
    ```
 
-5. **Follow the logs**
+5. **ログを追跡**
    ```bash
    hermes log --follow       # tail ~/.hermes/log/hermes-YYYYMMDD.log
    hermes debug --error -n 100
    ```
 
-6. **Drain scheduled tasks when ready**
+6. **準備ができたらスケジュール済みタスクを実行**
    ```bash
-   hermes task --prompt "Weekly AI recap"
-   hermes queue --all        # execute every scheduled task in order
+   hermes task --prompt "週次 AI まとめ"
+   hermes queue --all        # スケジュール済みタスクをすべて順番に実行
    ```
-   `QueueService` picks the oldest `scheduled` entries and runs them sequentially
-   so you do not have to trigger each task manually.
+   `QueueService` が最も古い `scheduled` エントリを選択し、順次実行するため、
+   各タスクを手動でトリガーする必要はありません。
 
-7. **Reset configuration if needed**
+7. **必要に応じて設定をリセット**
    ```bash
    hermes run --clear
    ```
-   `ConfigService` recreates the default YAML with Ollama + validation settings.
+   `ConfigService` が Ollama と検証設定を含むデフォルトの YAML を再作成します。
 
-See [USAGE_GUIDE.md](USAGE_GUIDE.md) for task-oriented walkthroughs.
+タスク指向のウォークスルーについては [USAGE_GUIDE.md](USAGE_GUIDE.md) を参照してください。
 
-## Core Commands
+## コアコマンド
 
-| Command | Description |
+| コマンド | 説明 |
 | --- | --- |
-| `hermes init` | Creates `~/.hermes/` directories and the default `config.yaml`. |
-| `hermes run --prompt ...` | Executes a one-off research task. Options include `--language`, `--api`, `--model`, `--min-validation`, `--max-validation`, `--min-search`, `--max-search`, `--retry`, `--query`, `--export` (latest run), and `--task-id` to run a scheduled task. |
-| `hermes task --prompt ...` | Saves prompts for later via `task-<ID>.yaml`. List with `--list`, delete with `--delete TASK_ID`. |
-| `hermes queue` | Executes scheduled tasks sequentially. Use `-n/--limit` to cap the run or `--all` to drain the queue. |
-| `hermes history` | Lists stored runs, exports reports with `--export TASK_ID PATH`, and deletes entries via `--delete`. |
-| `hermes log` | Shows or follows structured logs in `~/.hermes/log/`; `--task-id` filters to a specific run (defaults to the newest running task), `--follow` streams, and `-n` controls line count. |
-| `hermes debug` | Reads from both standard and debug log files with level filters (`--error`, `--warning`, `--info`, `--all`). |
+| `hermes init` | `~/.hermes/` ディレクトリとデフォルトの `config.yaml` を作成します。 |
+| `hermes run --prompt ...` | 単発のリサーチタスクを実行します。オプションには `--language`、`--api`、`--model`、`--min-validation`、`--max-validation`、`--min-search`、`--max-search`、`--retry`、`--query`、`--export`（最新の実行）、およびスケジュール済みタスクを実行するための `--task-id` があります。 |
+| `hermes task --prompt ...` | `task-<ID>.yaml` を介して後で使用するためにプロンプトを保存します。`--list` でリスト表示、`--delete TASK_ID` で削除します。 |
+| `hermes queue` | スケジュール済みタスクを順次実行します。`-n/--limit` で実行数を制限、`--all` でキューを空にします。 |
+| `hermes history` | 保存された実行をリスト表示し、`--export TASK_ID PATH` でレポートをエクスポート、`--delete` でエントリを削除します。 |
+| `hermes log` | `~/.hermes/log/` 内の構造化ログを表示または追跡します。`--task-id` で特定の実行にフィルタ（デフォルトは最新の実行中タスク）、`--follow` でストリーム、`-n` で行数を制御します。 |
+| `hermes debug` | 標準とデバッグの両方のログファイルからレベルフィルタ（`--error`、`--warning`、`--info`、`--all`）で読み取ります。 |
 
-Command implementations live in `hermes_cli/commands/` and delegate to services
-in `hermes_cli/services/` for testability.
+コマンドの実装は `hermes_cli/commands/` にあり、テスト容易性のために `hermes_cli/services/` の
+サービスに処理を委譲します。
 
-## Configuration Overview
+## 設定の概要
 
-`hermes init` (or the `ConfigService`) ensures the following layout:
+`hermes init`（または `ConfigService`）は以下のレイアウトを確保します:
 
 ```
 ~/.hermes/
@@ -152,59 +257,75 @@ in `hermes_cli/services/` for testability.
     └── hermes-YYYYMMDD.log
 ```
 
-Key config fields (`~/.hermes/config.yaml`):
+主要な設定フィールド（`~/.hermes/config.yaml`）:
 
-- `ollama.api_base`, `ollama.model`, `ollama.retry`, `ollama.timeout_sec`
-- `language`: default output locale (`ja` by default)
-- `validation.min_loops`, `validation.max_loops`: determine when Hermès stops
-  looping through the validator; min loops are always enforced even if quality
-  checks pass.
-- `search.min_sources`, `search.max_sources`: hints passed to nodes/tools when
-  collecting sources; current placeholders still respect provided bounds.
-- `logging.log_dir`, `logging.debug_log_dir`
-- `cli.history_limit`: default cap for `hermes history`
+- `ollama.api_base`、`ollama.model`、`ollama.retry`、`ollama.timeout_sec`
+- `language`: デフォルトの出力ロケール（デフォルトは `ja`）
+- `validation.min_loops`、`validation.max_loops`: Hermès がバリデーターのループを
+  停止するタイミングを決定します。品質チェックに合格しても最小ループは常に実行されます。
+- `search.min_sources`、`search.max_sources`: ソースを収集する際にノード/ツールに
+  渡されるヒント。現在のプレースホルダーは提供された範囲を尊重します。
+- `logging.log_dir`、`logging.debug_log_dir`
+- `cli.history_limit`: `hermes history` のデフォルト上限
 
-All run-time overrides map directly to CLI flags (e.g., `--model llama2:70b`
-updates the Ollama config only for that invocation).
+すべてのランタイムオーバーライドは CLI フラグに直接マップされます（例: `--model llama2:70b` は
+その呼び出しに対してのみ Ollama 設定を更新します）。
 
-## Current Limitations & Notes
+## 現在の制限と注意事項
 
-- Browser research now defaults to DuckDuckGo + httpx fetching and automatically
-  upgrades to `browser-use` when that optional dependency is installed. Until
-  an official PyPI release ships, install `browser-use` from source and then
-  use `pip install -e .[browser]` to enable richer automation.
-- Container processing prefers a disposable Docker/Python container for text
-  normalization. If Docker is unavailable, Hermes falls back to deterministic
-  local normalization and logs a warning.
-- Validation loops perform lightweight quality scoring plus follow-up query
-  generation, but the heuristic thresholds are still evolving. Expect some
-  over- or under-shooting as more evaluation data arrives.
-- Task scheduling stores prompts and metadata, but there is no background
-  scheduler. Use `hermes queue` (or `hermes run --task-id ...`) to process
-  entries when you're ready.
-- `hermes log --task-id` filters log lines, but historical log files are still
-  segmented by day. You may need to raise `--lines` to capture earlier phases.
+- **ブラウザリサーチ**: DuckDuckGo 統合は即座の Web 検索機能のために箱から出してすぐに動作します。
+  高度な自動化機能については、[統合のセットアップ](#統合のセットアップ)の手順に従って
+  ソースから `browser-use` をインストールしてください。Hermes は利用可能な場合、
+  browser-use を自動的に検出して使用します。
+- **コンテナ処理**: 分離されたテキスト正規化には Docker 20.10+ が必要です。
+  Docker が利用できない場合、Hermes は自動的にローカル処理にフォールバックし、
+  警告をログに記録します。Docker のインストール手順については
+  [統合のセットアップ](#統合のセットアップ)を参照してください。
+- **検証ループ**: 品質スコアリングとフォローアップクエリの生成は進化する
+  ヒューリスティックしきい値を使用します。使用データが増えるにつれて評価メトリクスが
+  改善されるため、ループ数にはある程度のばらつきが予想されます。
+- **タスクスケジューリング**: タスクは YAML ファイルとして保存されますが、
+  `hermes queue` または `hermes run --task-id` を介した手動実行が必要です。
+  バックグラウンドデーモンはありません。必要に応じてシステムの cron/systemd で
+  キュー実行をスケジュールしてください。
+- **ログフィルタリング**: `hermes log --task-id` はエントリをフィルタしますが、
+  ログファイルは日ごとにセグメント化されます（`hermes-YYYYMMDD.log`）。
+  深夜をまたぐ長時間実行タスクの場合、複数のログファイルを確認する必要がある場合があります。
+- **モデルタイムアウト**: デフォルトの Ollama タイムアウトは 180 秒です
+  （`~/.hermes/config.yaml: ollama.timeout_sec` で設定可能）。大規模なモデルや
+  複雑なクエリでは、より高い値が必要になる場合があります。
 
-See the open integration notes inside `hermes_cli/tools/` and
-`hermes_cli/agents/nodes/` for TODO markers.
+実装の詳細と拡張ポイントについては、`hermes_cli/tools/` と `hermes_cli/agents/nodes/` の
+統合ノートを参照してください。
 
-## Troubleshooting Highlights
+## トラブルシューティングのハイライト
 
-- **Ollama connection errors** – Ensure `ollama serve` is running locally and
-  that `~/.hermes/config.yaml` points `ollama.api_base` to the correct host.
-- **Model not found** – Run `ollama pull gpt-oss:20b` (or the model you set via
-  CLI). Hermes surfaces the HTTP 404/500 errors in `hermes log`.
-- **Stale configuration** – `hermes run --clear` regenerates the default config.
-- **Missing history/log files** – `hermes init` can be rerun safely; logs are
-  rotated per day (`hermes-YYYYMMDD.log`).
-- **LangGraph import issues** – Use `python test_workflow.py` to confirm that
-  `create_hermes_workflow()` compiles; reinstall dependencies if this fails.
+- **Ollama 接続エラー** – `ollama serve` がローカルで実行されており、
+  `~/.hermes/config.yaml` の `ollama.api_base` が正しいホストを指していることを確認してください。
+  `curl http://localhost:11434/api/version` で接続を確認してください。
+- **モデルが見つからない** – `ollama pull gpt-oss:20b`（または CLI で設定したモデル）を実行してください。
+  Hermes は HTTP 404/500 エラーを `hermes log` に表示します。
+- **タイムアウトエラー** – `~/.hermes/config.yaml` の `ollama.timeout_sec` を
+  デフォルトの 180 秒から増やしてください。大規模なモデルは複雑なクエリに 300 秒以上必要な場合があります。
+- **Docker 接続拒否** – container-use には Docker の実行が必要です。`docker ps` で確認してください。
+  利用できない場合、Hermes は警告とともにローカル処理にフォールバックします。
+- **DuckDuckGo のレート制限** – リクエスト間隔を空けるか、`--max-sources` を減らしてください。
+  サービスは急速なクエリを一時的にブロックする場合があります。1〜2 分待ってから再試行してください。
+- **browser-use が検出されない** – ソースからインストールした後、
+  `python -c "import browser_use; print('OK')"` で確認してください。
+  必要に応じて playwright ブラウザを再インストールしてください。
+- **古い設定** – `hermes run --clear` でデフォルト設定を再生成します。
+- **履歴/ログファイルの欠落** – `hermes init` は安全に再実行できます。ログは
+  日ごとにローテーションされます（`hermes-YYYYMMDD.log`）。
+- **LangGraph インポートの問題** – `python test_workflow.py` を使用して
+  `create_hermes_workflow()` がコンパイルされることを確認してください。
+  これが失敗する場合は依存関係を再インストールしてください。
 
-## Documentation Set
+## ドキュメント一覧
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) – layer breakdown, data flow, and node map
-- [DEVELOPMENT.md](DEVELOPMENT.md) – environment setup, tooling, testing tips
-- [USAGE_GUIDE.md](USAGE_GUIDE.md) – task-based walkthroughs and CLI flags
+- [ARCHITECTURE.md](ARCHITECTURE.md) – レイヤーの詳細、データフロー、ノードマップ
+- [DEVELOPMENT.md](DEVELOPMENT.md) – 環境セットアップ、ツール、テストのヒント
+- [USAGE_GUIDE.md](USAGE_GUIDE.md) – タスクベースのウォークスルーと CLI フラグ
 
-These documents live alongside this README at the repository root. Keep them
-updated as new services or integrations land.
+これらのドキュメントはリポジトリルートのこの README と同じ場所にあります。
+新しいサービスや統合が追加されたら更新してください。
