@@ -43,6 +43,11 @@ async def search_web(state: WorkflowState) -> WorkflowState:
 
         state["search_responses"] = search_responses
 
+        # 累積検索結果に追加（初回または検証ループ時）
+        if "all_search_responses" not in state:
+            state["all_search_responses"] = []
+        state["all_search_responses"].extend(search_responses)
+
         # 追加クエリをクリア
         if "additional_queries" in state:
             state["additional_queries"] = []

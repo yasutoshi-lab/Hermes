@@ -21,7 +21,8 @@ class WorkflowState(BaseModel):
     queries: List[str] = Field(default_factory=list)
 
     # 検索結果
-    search_responses: List[Dict[str, Any]] = Field(default_factory=list)
+    search_responses: List[Dict[str, Any]] = Field(default_factory=list)  # 直近の検索結果
+    all_search_responses: List[Dict[str, Any]] = Field(default_factory=list)  # 累積検索結果
     scraped_contents: List[Dict[str, Any]] = Field(default_factory=list)
 
     # 処理結果

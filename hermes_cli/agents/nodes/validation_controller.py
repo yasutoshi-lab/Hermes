@@ -24,6 +24,17 @@ def should_continue_validation(state: WorkflowState) -> str:
         logger.info("Max validation reached, finalizing", extra={"category": "RUN"})
         return "finalize"
 
+    # 連続して0件検索が発生している場合は検証を中止
+    recent_searches = state.get("search_responses", [])[-3:]  # 直近3回の検索
+    empty_search_count = sum(1 for r in recent_searches if len(r.get("results", [])) == 0)
+
+    if empty_search_count >= 2:
+        logger.warning(
+            f"Multiple empty searches detected ({empty_search_count}/3), finalizing early",
+            extra={"category": "RUN"},
+        )
+        return "finalize"
+
     # 検索が連続で失敗している場合は最小回数到達で終了
     search_responses = state.get("search_responses", [])
     has_results = any(len(r.get("results", [])) > 0 for r in search_responses)

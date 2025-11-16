@@ -36,6 +36,8 @@ class ValidationConfig(BaseModel):
 
     min_validation: int = Field(default=1, ge=0, le=10)
     max_validation: int = Field(default=3, ge=0, le=10)
+    strictness: Literal["strict", "moderate", "lenient"] = Field(default="moderate")
+    max_additional_queries: int = Field(default=3, ge=1, le=10, description="1回の検証で生成する追加クエリの最大数")
 
     @field_validator("max_validation")
     @classmethod

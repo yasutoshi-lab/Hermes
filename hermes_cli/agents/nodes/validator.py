@@ -3,6 +3,7 @@
 from loguru import logger
 from hermes_cli.agents.state import WorkflowState
 from hermes_cli.tools.ollama_client import OllamaClient
+from hermes_cli.agents.nodes.query_generator import validate_query_quality
 
 
 async def validate_report(state: WorkflowState) -> WorkflowState:
@@ -31,13 +32,37 @@ async def validate_report(state: WorkflowState) -> WorkflowState:
         draft = state.get("draft_report", state.get("final_report", {}))
         report_text = draft.get("sections", [{}])[0].get("content", "")
 
+        # 言語設定を取得
+        language = config.get("language", "ja")
+
+        # 検証設定を取得
+        validation_config = config.get("validation", {})
+        strictness = validation_config.get("strictness", "moderate")
+        max_additional_queries = validation_config.get("max_additional_queries", 3)
+
         # 検証実行
         validation_result = await client.validate(
-            report_text, state["original_prompt"]
+            report_text,
+            state["original_prompt"],
+            language=language,
+            strictness=strictness,
+            max_additional_queries=max_additional_queries
         )
 
         state["validation_issues"] = validation_result.get("issues", [])
-        state["additional_queries"] = validation_result.get("additional_queries", [])
+
+        # 追加クエリの品質チェック
+        raw_additional_queries = validation_result.get("additional_queries", [])
+        validated_additional_queries = validate_query_quality(raw_additional_queries, language)
+
+        # 品質チェックで除外されたクエリがある場合はログに記録
+        if len(validated_additional_queries) < len(raw_additional_queries):
+            logger.info(
+                f"Filtered additional queries: {len(raw_additional_queries)} -> {len(validated_additional_queries)}",
+                extra={"category": "RUN"}
+            )
+
+        state["additional_queries"] = validated_additional_queries
 
         logger.info(
             f"Validation completed: {len(state['validation_issues'])} issues found",

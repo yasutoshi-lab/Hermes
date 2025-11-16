@@ -28,6 +28,8 @@ search:
 validation:
   min_validation: 1
   max_validation: 3
+  strictness: moderate  # strict, moderate, lenient
+  max_additional_queries: 3  # 1回の検証で生成する追加クエリの最大数
 
 # ブラウザ設定
 browser:

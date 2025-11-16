@@ -16,7 +16,9 @@ def create_draft(state: WorkflowState) -> WorkflowState:
         citations = []
         citation_index = 1
 
-        for response in state["search_responses"]:
+        # 累積された全検索結果から引用を作成
+        search_data = state.get("all_search_responses", state["search_responses"])
+        for response in search_data:
             for result in response.get("results", []):
                 citations.append(
                     {

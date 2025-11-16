@@ -123,20 +123,47 @@ class OllamaClient:
 
         return await self.chat(user_prompt, system_prompt)
 
-    async def validate(self, report: str, original_prompt: str) -> Dict[str, Any]:
+    async def validate(
+        self,
+        report: str,
+        original_prompt: str,
+        language: str = "ja",
+        strictness: str = "moderate",
+        max_additional_queries: int = 3
+    ) -> Dict[str, Any]:
         """レポート検証"""
-        system_prompt = """あなたは品質管理の専門家です。
+
+        language_instructions = {
+            "ja": "追加クエリは必ず日本語で生成してください。元のプロンプトと同じ言語を維持することが重要です。",
+            "en": "Generate additional queries in English. Maintain the same language as the original prompt."
+        }
+        language_instruction = language_instructions.get(language, language_instructions["ja"])
+
+        strictness_instructions = {
+            "strict": "非常に厳密に評価し、小さな不足も指摘してください。完璧なレポートを目指します。",
+            "moderate": "バランスよく評価し、重要な不足のみ指摘してください。実用的な品質を重視します。",
+            "lenient": "寛容に評価し、致命的な問題のみ指摘してください。大まかな正確性を重視します。"
+        }
+        strictness_instruction = strictness_instructions.get(strictness, strictness_instructions["moderate"])
+
+        system_prompt = f"""あなたは品質管理の専門家です。
 レポートを分析し、以下の観点で評価してください：
 1. 矛盾や論理的誤りはないか
 2. 元の質問に十分に答えているか
 3. 追加調査が必要な点はないか
 
+{strictness_instruction}
+
+{language_instruction}
+
+追加クエリは最大{max_additional_queries}個までに制限してください。
+
 評価結果をJSON形式で返してください：
-{
+{{
   "has_issues": true/false,
   "issues": ["問題点1", "問題点2", ...],
   "additional_queries": ["追加クエリ1", ...]
-}"""
+}}"""
 
         user_prompt = f"""元の質問: {original_prompt}
 
@@ -164,6 +191,49 @@ class OllamaClient:
                 }
         else:
             return {"has_issues": False, "issues": [], "additional_queries": []}
+
+    async def check_relevance(
+        self, report_content: str, original_query: str
+    ) -> Dict[str, Any]:
+        """レポートと元のクエリの関連性をチェック"""
+        system_prompt = """あなたは品質評価の専門家です。
+レポートの内容が元のクエリに対して適切に回答しているかを評価してください。
+
+0.0から1.0のスコアで評価し、理由も含めて返してください：
+- 1.0: 完全に関連性があり、クエリに対して十分な回答がある
+- 0.7-0.9: 概ね関連性があるが、一部不足がある
+- 0.4-0.6: 部分的に関連性があるが、多くの不足がある
+- 0.0-0.3: ほとんど関連性がない、または全く異なる内容
+
+JSON形式で返してください：
+{
+  "score": 0.0-1.0,
+  "reason": "評価理由"
+}"""
+
+        user_prompt = f"""元のクエリ: {original_query}
+
+レポート内容:
+{report_content[:2000]}
+
+上記レポートの関連性を評価してください。"""
+
+        response = await self.chat(user_prompt, system_prompt)
+
+        # JSON抽出
+        json_match = re.search(r"\{.*\}", response, re.DOTALL)
+        if json_match:
+            try:
+                result = json.loads(json_match.group())
+                return result
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Failed to parse relevance check JSON",
+                    extra={"category": "OLLAMA"},
+                )
+                return {"score": 0.5, "reason": "JSON parsing failed"}
+        else:
+            return {"score": 0.5, "reason": "No JSON response"}
 
     async def close(self):
         """クライアントクローズ"""
